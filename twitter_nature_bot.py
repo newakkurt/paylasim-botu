@@ -138,7 +138,7 @@ def create_post(channel_id: str, text: str, image_url: str) -> None:
                 "text": text,
                 "channelId": channel_id,
                 "schedulingType": "automatic",
-                "mode": "addToQueue",
+                "mode": "shareNow",
                 "assets": [{"image": {"url": image_url}}],
             }
         },
