@@ -105,7 +105,7 @@ def get_twitter_channel_id(organization_id: str) -> str:
 
 def get_random_fact() -> str:
     return random.choice(FACTS)
-
+HASHTAGS = "#doğa #orman #doğasever #natural #forest #tech"
 
 def get_unsplash_image_url(query: str = "forest nature") -> str:
     """Unsplash'ten lisanslı bir doğa fotoğrafının herkese açık linkini döndürür."""
@@ -152,7 +152,7 @@ def create_post(channel_id: str, text: str, image_url: str) -> None:
 def main() -> None:
     org_id = get_organization_id()
     channel_id = get_twitter_channel_id(org_id)
-    text = get_random_fact()
+    text = get_random_fact() + "\n\n" + HASHTAGS
     image_url = get_unsplash_image_url()
     create_post(channel_id, text, image_url)
 
