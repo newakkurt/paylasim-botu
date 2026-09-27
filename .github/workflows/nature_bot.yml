@@ -3,7 +3,7 @@ name: Nature Bot Daily Post
 
 on:
   schedule:
-    - cron: "0 9,15,21 * * *"   # günde 3 kez: 09:00, 15:00, 21:00 UTC (TR saatiyle 12:00, 18:00, 00:00)
+    - cron: "0 9,15,21 * * *"   # günde 3 kez: 09:00, 12:41, 21:00 UTC (TR saatiyle 12:00, 18:00, 00:00)
     
   workflow_dispatch: {}     # GitHub Actions sekmesinden elle de tetiklenebilir
 
