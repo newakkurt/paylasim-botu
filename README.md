@@ -1,26 +1,44 @@
-# Doğa/Orman Bilgi Botu — Kurulum
+# Doğa/Orman Bilgi Botu — Buffer sürümü (tamamen ücretsiz)
 
-## 1. API anahtarlarını al
-- **Anthropic**: console.anthropic.com → API key
-- **X (Twitter)**: developer.x.com → yeni App oluştur → App permissions'ı **Read and Write** yap → Keys and tokens'tan 4 değeri al (API Key/Secret, Access Token/Secret). Ücretsiz katman post atmaya yetmiyor, en az **Basic** paket ($100/ay) gerekiyor.
-- **Unsplash**: unsplash.com/developers → yeni app → Access Key
-- **OpenAI**: platform.openai.com → API key (görsel üretimi ücretli, ~görsel başına birkaç cent)
+Bu sürüm X'in ücretli developer API'sini kullanmıyor. Buffer, X'e gönderim
+maliyetini kendi üstleniyor; sen sadece X hesabını Buffer'a bağlıyorsun.
 
-## 2. Yerelde test et
+## 1. Buffer hesabı aç ve X'i bağla
+1. buffer.com → ücretsiz hesap aç
+2. Dashboard'da **"Connect a channel"** → **X (Twitter)** seç → X hesabınla giriş yapıp izin ver
+   (X developer portalına, App'e, karta hiç gerek yok — normal X girişi yeterli)
+
+## 2. Buffer API key al
+1. Giriş yapmışken şu adrese git: **publish.buffer.com/settings/api**
+2. **"Create personal access token"** (veya benzeri) ile bir key oluştur, kopyala
+
+## 3. Unsplash key al (daha önce aldıysan atla)
+- unsplash.com/developers → New Application → Access Key (ücretsiz)
+
+## 4. Yerelde test et (opsiyonel)
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # değerleri doldur
-export $(cat .env | xargs)   # ya da python-dotenv kullan
+export $(cat .env | xargs)
 python twitter_nature_bot.py
 ```
+Script otomatik olarak Buffer hesabındaki organizasyonu ve bağlı X kanalını
+bulur — kanal ID'sini elle girmene gerek yok.
 
-## 3. Otomatik/günlük çalıştırma (GitHub Actions — ücretsiz)
-1. Bu dosyaları bir GitHub repo'suna at (private repo olabilir)
-2. `.github_workflows_template/nature_bot.yml` dosyasını `.github/workflows/nature_bot.yml` yoluna taşı
-3. Repo → Settings → Secrets and variables → Actions → her API anahtarını "New repository secret" olarak ekle (isimler .env.example ile birebir aynı olmalı)
-4. Actions sekmesinden "Run workflow" ile elle test et, sorun yoksa her gün 09:00 UTC'de kendiliğinden çalışır
+## 5. Otomatik/günlük çalıştırma (GitHub Actions — ücretsiz)
+1. Bu dosyaları GitHub reponuza yükle (üzerine yaz)
+2. `.github_workflows_template/nature_bot.yml` dosyasını
+   `.github/workflows/nature_bot.yml` yoluna taşı
+3. Repo → Settings → Secrets and variables → Actions → şu 2 secret'ı ekle:
+   `BUFFER_API_KEY`, `UNSPLASH_ACCESS_KEY`
+   (Eski `TWITTER_*` secret'ları artık kullanılmıyor, silebilirsin)
+4. Actions sekmesinden "Run workflow" ile elle test et
+
+Bundan sonra her gün otomatik çalışır — Buffer kuyruğa ekler, X'e otomatik
+gönderir, hiçbir maliyet veya bakım gerekmez.
 
 ## Notlar
-- `IMAGE_MODE=mixed` her paylaşımda %50 Unsplash, %50 AI-üretim arasında rastgele seçim yapar. İstersen `.env`'de `stock` ya da `ai` olarak sabitleyebilirsin.
-- Unsplash kullanımı ücretsiz ama demo App'lerde saatlik istek limiti var (50/saat) — günde 1 paylaşım için sorun değil.
-- Twitter/X App'in "Read and Write" izni olmazsa `media_upload` veya `create_tweet` 403 hatası verir — en sık karşılaşılan sorun bu.
+- Bilgi havuzunu (`FACTS` listesi, twitter_nature_bot.py içinde) istediğin
+  kadar genişletebilirsin.
+- Buffer ücretsiz planda API kişisel key ile açık; kanal bağlıysa ekstra
+  ayar gerekmez.

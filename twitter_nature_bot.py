@@ -1,126 +1,161 @@
 """
-Doğa/Orman Bilgi Botu
-----------------------
-Claude API ile bir doğa/orman bilgisi üretir, Unsplash'ten lisanslı bir
-fotoğraf ya da AI ile üretilmiş bir görsel ekler ve X (Twitter) hesabından
-paylaşır.
+Doğa/Orman Bilgi Botu (Buffer sürümü — tamamen ücretsiz)
+----------------------------------------------------------
+Sabit bir bilgi havuzundan rastgele bir doğa/orman bilgisi seçer, Unsplash'ten
+lisanslı bir fotoğraf linki bulur ve Buffer API üzerinden bağlı X hesabının
+kuyruğuna ekler. Buffer, X'e gönderimi kendi üstleniyor — X'in ücretli
+developer API'sine hiç ihtiyaç yok.
 
 Gerekli ortam değişkenleri (.env.example dosyasına bak):
-  ANTHROPIC_API_KEY
-  TWITTER_API_KEY, TWITTER_API_SECRET
-  TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET
-  UNSPLASH_ACCESS_KEY
-  OPENAI_API_KEY        (AI görsel üretimi için)
-  CONTENT_LANGUAGE      (opsiyonel, varsayılan "tr")
-  IMAGE_MODE            (opsiyonel: "stock" | "ai" | "mixed", varsayılan "mixed")
+  BUFFER_API_KEY       - publish.buffer.com/settings/api adresinden alınır
+  UNSPLASH_ACCESS_KEY  - unsplash.com/developers adresinden alınır
 """
 
-import base64
 import os
 import random
-import tempfile
 
 import requests
-import tweepy
-from anthropic import Anthropic
 
-CONTENT_LANGUAGE = os.getenv("CONTENT_LANGUAGE", "tr")
-IMAGE_MODE = os.getenv("IMAGE_MODE", "mixed")  # "stock" | "ai" | "mixed"
+BUFFER_API_URL = "https://api.buffer.com"
+BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
+UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
 
-anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+FACTS = [
+    "Bir ağaç yılda ortalama 22 kilogram karbondioksit emer ve karşılığında oksijen üretir.",
+    "Amazon Ormanları dünyadaki oksijenin yaklaşık %20'sini üretir, bu yüzden 'dünyanın akciğerleri' olarak anılır.",
+    "Mantarlar, yer altında dev bir ağ oluşturarak ağaçların birbiriyle besin ve bilgi alışverişi yapmasını sağlar; buna 'orman interneti' denir.",
+    "Sekoya ağaçları 100 metreyi aşan boylara ulaşabilir ve 3000 yıldan fazla yaşayabilir.",
+    "Bir meşe ağacı, yaşamı boyunca yaklaşık 10 milyon adet meşe palamudu üretebilir.",
+    "Orman toprağının sadece bir avucunda, dünya nüfusundan daha fazla mikroorganizma bulunur.",
+    "Kelebekler ayaklarıyla tat alır; bir çiçeğe konduklarında onu ayaklarıyla 'tadarlar'.",
+    "Baykuşlar boyunlarını 270 dereceye kadar çevirebilir çünkü göz küreleri hareket etmez.",
+    "Bambü, dünyanın en hızlı büyüyen bitkisidir; bazı türleri günde 90 santimetre büyüyebilir.",
+    "Bir karınca kendi ağırlığının 50 katına kadar yük taşıyabilir.",
+    "Tundra bölgelerinde yaşayan ren geyikleri, gözlerinin rengini mevsime göre değiştirebilir.",
+    "Deniz otu çayırları, tropik yağmur ormanlarından bile daha hızlı karbon depolayabilir.",
+    "Ağaçlar birbirlerine kimyasal sinyaller göndererek zararlı böcek saldırılarına karşı komşularını uyarabilir.",
+    "Dünyadaki tatlı suyun yaklaşık %20'si Amazon Nehri havzasından akar.",
+    "Bal arıları, kovanlarına dönüş yolunu bulmak için Güneş'in konumunu pusula gibi kullanır.",
+    "Kutup ayılarının derisi aslında siyahtır; kürkleri ışığı yansıttığı için beyaz görünür.",
+    "Bir yağmur ormanı ağacının tepesindeki (kanopi) ekosistem, ormanın geri kalanından tamamen farklı canlı türlerine ev sahipliği yapar.",
+    "Fillerin ayak tabanlarındaki hassas sinirler, kilometrelerce uzaktaki depremleri ve diğer fillerin ayak seslerini algılayabilir.",
+    "Dünyadaki tüm canlı biyokütlenin yarısından fazlasını bitkiler oluşturur.",
+    "Bazı orkide türleri, döllenmek için belirli bir arı türünü taklit edecek şekilde evrimleşmiştir.",
+    "Bir orman yangınından sonra bazı çam kozalakları ancak yüksek ısıyla açılıp tohumlarını serbest bırakır.",
+    "Ahtapotlar üç kalbe sahiptir; ikisi solungaçlara, biri vücudun geri kalanına kan pompalar.",
+    "Yağmur ormanlarında, güneş ışığının toprağa ulaşması saatler sürebilir çünkü kat kat yaprak katmanlarından süzülür.",
+    "Kunduzların yaptığı barajlar, zamanla küçük göller ve sulak alanlar oluşturarak yüzlerce türe yaşam alanı sağlar.",
+    "Bazı ağaç türleri, kuraklık dönemlerinde köklerini kullanarak komşu ağaçlarla su paylaşabilir.",
+    "Yarasalar, tozlaşmadan tohum yayılımına kadar birçok tropik bitkinin hayatta kalması için kritik öneme sahiptir.",
+    "Bir orman ekosistemindeki yaprak döken bir ağaç, mevsim boyunca yaklaşık 200.000 yaprak dökebilir.",
+    "Karıncalar, dünya üzerindeki toplam hayvan biyokütlesinin önemli bir kısmını oluşturur.",
+    "Denizanaları 500 milyon yıldan uzun süredir var olan, dinozorlardan bile daha eski canlılardır.",
+    "Bazı mantar türleri, tespit edilen en büyük ve en yaşlı canlı organizmalar arasındadır; bazıları binlerce dönümü kaplar.",
+]
 
-twitter_client = tweepy.Client(
-    consumer_key=os.environ["TWITTER_API_KEY"],
-    consumer_secret=os.environ["TWITTER_API_SECRET"],
-    access_token=os.environ["TWITTER_ACCESS_TOKEN"],
-    access_token_secret=os.environ["TWITTER_ACCESS_SECRET"],
-)
 
-_auth = tweepy.OAuth1UserHandler(
-    os.environ["TWITTER_API_KEY"],
-    os.environ["TWITTER_API_SECRET"],
-    os.environ["TWITTER_ACCESS_TOKEN"],
-    os.environ["TWITTER_ACCESS_SECRET"],
-)
-twitter_api_v1 = tweepy.API(_auth)  # medya yüklemek için v1.1 lazım
-
-
-def generate_tweet_text() -> str:
-    """Claude API ile doğa/orman hakkında kısa, ilginç bir bilgi üretir."""
-    prompt = (
-        "Doğa ve orman ekosistemleri hakkında az bilinen, ilginç, doğrulanabilir "
-        "bir bilgi paylaş. Türkçe yaz. 240 karakteri geçme, hashtag kullanma, "
-        "en fazla 1-2 emoji kullanabilirsin. Sadece tweet metnini döndür, "
-        "başka hiçbir açıklama ekleme."
-        if CONTENT_LANGUAGE == "tr"
-        else "Share a little-known, interesting, verifiable fact about nature "
-        "and forest ecosystems. Keep it under 240 characters, no hashtags, "
-        "at most 1-2 emojis. Return only the tweet text."
+def buffer_graphql(query: str, variables: dict | None = None) -> dict:
+    resp = requests.post(
+        BUFFER_API_URL,
+        headers={
+            "Authorization": f"Bearer {BUFFER_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={"query": query, "variables": variables or {}},
+        timeout=20,
     )
-    msg = anthropic_client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}],
+    resp.raise_for_status()
+    data = resp.json()
+    if "errors" in data and data["errors"]:
+        raise RuntimeError(f"Buffer API hatası: {data['errors']}")
+    return data["data"]
+
+
+def get_organization_id() -> str:
+    data = buffer_graphql(
+        "query GetOrganizations { account { organizations { id name } } }"
     )
-    return msg.content[0].text.strip()
+    orgs = data["account"]["organizations"]
+    if not orgs:
+        raise RuntimeError("Buffer hesabında hiç organizasyon bulunamadı.")
+    return orgs[0]["id"]
 
 
-def get_stock_image_path(query: str = "forest nature") -> str:
-    """Unsplash'ten lisanslı, telif sorunu olmayan bir doğa fotoğrafı çeker."""
+def get_twitter_channel_id(organization_id: str) -> str:
+    data = buffer_graphql(
+        """
+        query GetChannels($organizationId: String!) {
+          channels(input: { organizationId: $organizationId }) {
+            id
+            name
+            service
+          }
+        }
+        """,
+        {"organizationId": organization_id},
+    )
+    for ch in data["channels"]:
+        if ch["service"] in ("twitter", "x"):
+            return ch["id"]
+    raise RuntimeError(
+        "Buffer hesabına bağlı bir X/Twitter kanalı bulunamadı. "
+        "Buffer'da X hesabını bağladığından emin ol."
+    )
+
+
+def get_random_fact() -> str:
+    return random.choice(FACTS)
+
+
+def get_unsplash_image_url(query: str = "forest nature") -> str:
+    """Unsplash'ten lisanslı bir doğa fotoğrafının herkese açık linkini döndürür."""
     resp = requests.get(
         "https://api.unsplash.com/photos/random",
         params={"query": query, "orientation": "landscape"},
-        headers={"Authorization": f"Client-ID {os.environ['UNSPLASH_ACCESS_KEY']}"},
+        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
         timeout=15,
     )
     resp.raise_for_status()
-    image_url = resp.json()["urls"]["regular"]
-    img_data = requests.get(image_url, timeout=15).content
-    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-    tmp.write(img_data)
-    tmp.close()
-    return tmp.name
+    return resp.json()["urls"]["regular"]
 
 
-def get_ai_image_path(prompt_hint: str) -> str:
-    """OpenAI görsel üretim API'siyle orijinal bir doğa görseli üretir."""
-    resp = requests.post(
-        "https://api.openai.com/v1/images/generations",
-        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-        json={
-            "model": "gpt-image-1",
-            "prompt": f"Realistic nature photograph style image, forest/nature theme: {prompt_hint}",
-            "size": "1024x1024",
+def create_post(channel_id: str, text: str, image_url: str) -> None:
+    data = buffer_graphql(
+        """
+        mutation CreatePost($input: CreatePostInput!) {
+          createPost(input: $input) {
+            ... on PostActionSuccess {
+              post { id text dueAt }
+            }
+            ... on MutationError {
+              message
+            }
+          }
+        }
+        """,
+        {
+            "input": {
+                "text": text,
+                "channelId": channel_id,
+                "schedulingType": "automatic",
+                "mode": "addToQueue",
+                "assets": [{"image": {"url": image_url}}],
+            }
         },
-        timeout=60,
     )
-    resp.raise_for_status()
-    b64_data = resp.json()["data"][0]["b64_json"]
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    tmp.write(base64.b64decode(b64_data))
-    tmp.close()
-    return tmp.name
+    result = data["createPost"]
+    if "message" in result:
+        raise RuntimeError(f"Post oluşturulamadı: {result['message']}")
+    print("Kuyruğa eklendi:", result["post"])
 
 
-def get_image_path(tweet_text: str) -> str:
-    mode = IMAGE_MODE
-    if mode == "mixed":
-        mode = random.choice(["stock", "ai"])
-    if mode == "ai":
-        return get_ai_image_path(tweet_text)
-    return get_stock_image_path()
-
-
-def post_tweet() -> None:
-    text = generate_tweet_text()
-    image_path = get_image_path(text)
-    try:
-        media = twitter_api_v1.media_upload(image_path)
-        twitter_client.create_tweet(text=text, media_ids=[media.media_id])
-        print("Paylaşıldı:", text)
-    finally:
-        os.remove(image_path)
+def main() -> None:
+    org_id = get_organization_id()
+    channel_id = get_twitter_channel_id(org_id)
+    text = get_random_fact()
+    image_url = get_unsplash_image_url()
+    create_post(channel_id, text, image_url)
 
 
 if __name__ == "__main__":
-    post_tweet()
+    main()
