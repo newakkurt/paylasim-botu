@@ -32,13 +32,13 @@ SPECIAL_ENVIRONMENTAL_DAYS = {
 
 # 2. Haftanın Günlerine Özel Konseptler
 WEEKDAY_CONCEPTS = {
-    0: ("Dev Ağaçlar ve Ormanlar", "#ForestMonday", ["giant trees", "ancient forest", "redwood trees", "deep woods"]),
-    1: ("Büyüleyici Bitkiler ve Mantarlar", "#PlantTuesday", ["exotic plants", "rare flowers", "bioluminescent mushroom", "botanical nature"]),
-    2: ("Yaban Hayatı ve Doğa Canlıları", "#WildlifeWednesday", ["wildlife nature", "wild animals", "forest animals", "jungle wildlife"]),
-    3: ("Dağlar, Vadiler ve Doğal Oluşumlar", "#EarthThursday", ["majestic mountains", "canyons landscape", "nature valley", "geological wonders"]),
-    4: ("Okyanuslar, Denizler ve Su Altı", "#OceanFriday", ["ocean life", "coral reef", "underwater nature", "deep sea beauty"]),
-    5: ("Kuşlar ve Gökyüzü Canlıları", "#SkySaturday", ["wild birds", "soaring eagle", "exotic birds", "birds in nature"]),
-    6: ("Biyoçeşitlilik ve Ekosistemler", "#NatureSunday", ["biodiversity nature", "rainforest ecosystem", "pristine nature", "wild landscape"]),
+    0: ("Dev Ağaçlar ve Ormanlar", "#ForestMonday", ["forest", "trees", "woodland"]),
+    1: ("Büyüleyici Bitkiler ve Mantarlar", "#PlantTuesday", ["plants", "flowers", "mushrooms"]),
+    2: ("Yaban Hayatı ve Doğa Canlıları", "#WildlifeWednesday", ["wildlife", "animals", "jungle"]),
+    3: ("Dağlar, Vadiler ve Doğal Oluşumlar", "#EarthThursday", ["mountains", "canyon", "valley"]),
+    4: ("Okyanuslar, Denizler ve Su Altı", "#OceanFriday", ["ocean", "underwater", "sea"]),
+    5: ("Kuşlar ve Gökyüzü Canlıları", "#SkySaturday", ["birds", "eagle", "flying"]),
+    6: ("Biyoçeşitlilik ve Ekosistemler", "#NatureSunday", ["nature", "rainforest", "landscape"]),
 }
 
 
@@ -46,13 +46,13 @@ def get_seasonal_keywords() -> list[str]:
     """Aya göre mevsimsel Unsplash kelimelerini döndürür."""
     month = datetime.now().month
     if month in (12, 1, 2):
-        return ["winter", "snow", "frozen"]
+        return ["winter", "snow"]
     elif month in (3, 4, 5):
-        return ["spring", "blooming", "fresh green"]
+        return ["spring", "bloom"]
     elif month in (6, 7, 8):
-        return ["summer", "sunny", "lush green"]
+        return ["summer", "green"]
     else:
-        return ["autumn", "fall foliage", "golden leaves"]
+        return ["autumn", "fall"]
 
 
 def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
@@ -66,7 +66,7 @@ def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
         print(f"🎉 Özel Gün Algılandı: {event_name}")
         full_hashtags = f"{hashtag} {BASE_HASHTAGS}"
         prompt_instruction = f"Bugün {event_name}! Özellikle {focus} hakkında ilginç, etkileyici ve bugünün anlam ve önemine uygun bir bilgi yaz."
-        search_keywords = [focus, "nature landscape", "environment"]
+        search_keywords = ["nature", "environment"]
         return prompt_instruction, full_hashtags, search_keywords
 
     # Haftalık Günlük Konsept Kontrolü
@@ -109,15 +109,8 @@ def generate_nature_fact(prompt_instruction: str) -> str:
     raise RuntimeError("Gemini API tüm denemelere rağmen yanıt veremedi.")
 
 
-def get_unsplash_image_and_alt(concept_keywords: list[str]) -> tuple[str, str]:
-    """Mevsim ve günün konseptini harmanlayarak Unsplash'ten görsel ve Alt-Text çeker."""
-    seasonal_words = get_seasonal_keywords()
-    selected_concept = random.choice(concept_keywords)
-    selected_season = random.choice(seasonal_words)
-    query_str = f"{selected_season} {selected_concept}"
-    
-    print(f"Unsplash araması yapılıyor: '{query_str}'")
-
+def fetch_unsplash_photo(query_str: str) -> dict:
+    """Unsplash API'sinden fotoğraf verisini çeker."""
     resp = requests.get(
         "https://api.unsplash.com/photos/random",
         params={"query": query_str, "orientation": "landscape"},
@@ -125,12 +118,33 @@ def get_unsplash_image_and_alt(concept_keywords: list[str]) -> tuple[str, str]:
         timeout=15,
     )
     resp.raise_for_status()
-    data = resp.json()
+    return resp.json()
+
+
+def get_unsplash_image_and_alt(concept_keywords: list[str]) -> tuple[str, str]:
+    """Arama terimini basitleştirerek Unsplash'ten görsel çeker; hata durumunda varsayılan aramaya geçer."""
+    selected_concept = random.choice(concept_keywords)
+    selected_season = random.choice(get_seasonal_keywords())
     
-    image_url = data["urls"]["regular"]
-    alt_text = data.get("alt_description") or data.get("description") or "Doğa manzarası fotoğrafı"
-    
-    return image_url, alt_text
+    # Çok uzun/karmaşık sorgulardan kaçınmak için tekli veya ikili kelime kullanımı
+    query_candidates = [
+        f"{selected_season} {selected_concept}",
+        selected_concept,
+        "nature"
+    ]
+
+    for query_str in query_candidates:
+        try:
+            print(f"Unsplash araması deneniyor: '{query_str}'")
+            data = fetch_unsplash_photo(query_str)
+            image_url = data["urls"]["regular"]
+            alt_text = data.get("alt_description") or data.get("description") or "Doğa manzarası fotoğrafı"
+            return image_url, alt_text
+        except Exception as e:
+            print(f"Unsplash sorgusu hatası ('{query_str}'): {e}. Yedek sorguya geçiliyor...")
+            time.sleep(1)
+
+    raise RuntimeError("Unsplash API hiçbir arama sorgusuna görsel döndüremedi.")
 
 
 def send_telegram_notification(text: str, image_url: str) -> None:
@@ -227,7 +241,7 @@ def get_twitter_channel_id(organization_id: str) -> str:
     for ch in data["channels"]:
         if ch["service"] in ("twitter", "x"):
             return ch["id"]
-    raise RuntimeError("Buffer hesabına bağlı bir X/Twitter kanalı bulunamadı.")
+    raise RuntimeError("Buffer hesabında bağlı bir X/Twitter kanalı bulunamadı.")
 
 
 def create_post(channel_id: str, text: str, image_url: str, alt_text: str) -> None:
