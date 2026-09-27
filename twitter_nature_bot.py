@@ -19,7 +19,7 @@ UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
 
 STATE_FILE = "state/used_facts.json"
-HASHTAGS = "#doğa #orman #doğasever #nature #forest #wildlife #naturelovers #earth"
+HASHTAGS = "#doğa #orman #nature #forest #earth"
 
 FACTS = [
     "Bir ağaç yılda ortalama 22 kilogram karbondioksit emer ve karşılığında oksijen üretir.",
