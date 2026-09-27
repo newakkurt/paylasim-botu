@@ -27,7 +27,7 @@ NATURE_KEYWORDS = [
 
 
 def generate_nature_fact() -> str:
-    """Google Gemini API kullanarak benzersiz ve taze bir doğa bilgisi üretir (Hata korumalı)."""
+    """Google Gemini API kullanarak benzersiz ve taze bir doğa bilgisi üretir."""
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = (
@@ -37,11 +37,11 @@ def generate_nature_fact() -> str:
         "Uzunluğu maksimum 200 karakter olsun."
     )
     
-    # Denenecek model öncelik sırası
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    # Güncel ve geçerli modeller
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash"]
     
     for model_name in models_to_try:
-        for attempt in range(3):  # Her model için 3 kere dene
+        for attempt in range(3):
             try:
                 print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
                 response = client.models.generate_content(
@@ -51,7 +51,7 @@ def generate_nature_fact() -> str:
                 return response.text.strip()
             except Exception as e:
                 print(f"Gemini API uyarısı ({model_name}): {e}")
-                time.sleep(3)  # 503 yoğunluk hatası durumunda 3 saniye bekle
+                time.sleep(3)
                 
     raise RuntimeError("Gemini API tüm denemelere rağmen yanıt veremedi.")
 
@@ -165,3 +165,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
