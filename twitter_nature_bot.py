@@ -36,9 +36,8 @@ def generate_nature_fact() -> str:
         "Uzunluğu maksimum 200 karakter olsun."
     )
     
-    # Model ismi güncel standart olan 'gemini-2.5-flash' olarak ayarlandı
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     return response.text.strip()
