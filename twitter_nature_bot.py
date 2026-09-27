@@ -80,7 +80,7 @@ def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
 
 
 def generate_nature_fact(prompt_instruction: str) -> str:
-    """Google Gemini API kullanarak konsept odaklı bilgi ve etkileşim sorusu üretir."""
+    """Google Gemini API kullanarak gemini-3.8-flash modeli ile içerik üretir."""
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = (
@@ -91,20 +91,19 @@ def generate_nature_fact(prompt_instruction: str) -> str:
         "Toplam uzunluk maksimum 220 karakter olsun."
     )
 
-    models_to_try = ["gemini-3.8-flash"]
+    model_name = "gemini-3.8-flash"
 
-    for model_name in models_to_try:
-        for attempt in range(3):
-            try:
-                print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                return response.text.strip()
-            except Exception as e:
-                print(f"Gemini API uyarısı ({model_name}): {e}")
-                time.sleep(3)
+    for attempt in range(3):
+        try:
+            print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            return response.text.strip()
+        except Exception as e:
+            print(f"Gemini API uyarısı ({model_name}): {e}")
+            time.sleep(3)
 
     raise RuntimeError("Gemini API tüm denemelere rağmen yanıt veremedi.")
 
@@ -121,12 +120,11 @@ def fetch_unsplash_photo(query_str: str) -> dict:
     return resp.json()
 
 
-def get_unsplash_image_and_alt(concept_keywords: list[str]) -> tuple[str, str]:
+def get_unsplash_image_url(concept_keywords: list[str]) -> str:
     """Arama terimini basitleştirerek Unsplash'ten görsel çeker; hata durumunda varsayılan aramaya geçer."""
     selected_concept = random.choice(concept_keywords)
     selected_season = random.choice(get_seasonal_keywords())
     
-    # Çok uzun/karmaşık sorgulardan kaçınmak için tekli veya ikili kelime kullanımı
     query_candidates = [
         f"{selected_season} {selected_concept}",
         selected_concept,
@@ -137,9 +135,7 @@ def get_unsplash_image_and_alt(concept_keywords: list[str]) -> tuple[str, str]:
         try:
             print(f"Unsplash araması deneniyor: '{query_str}'")
             data = fetch_unsplash_photo(query_str)
-            image_url = data["urls"]["regular"]
-            alt_text = data.get("alt_description") or data.get("description") or "Doğa manzarası fotoğrafı"
-            return image_url, alt_text
+            return data["urls"]["regular"]
         except Exception as e:
             print(f"Unsplash sorgusu hatası ('{query_str}'): {e}. Yedek sorguya geçiliyor...")
             time.sleep(1)
@@ -244,8 +240,8 @@ def get_twitter_channel_id(organization_id: str) -> str:
     raise RuntimeError("Buffer hesabında bağlı bir X/Twitter kanalı bulunamadı.")
 
 
-def create_post(channel_id: str, text: str, image_url: str, alt_text: str) -> None:
-    """Buffer üzerinden X gönderisi ve Alt-Text paylaşımı yapar."""
+def create_post(channel_id: str, text: str, image_url: str) -> None:
+    """Buffer üzerinden X gönderisi paylaşımı yapar."""
     data = buffer_graphql(
         """
         mutation CreatePost($input: CreatePostInput!) {
@@ -265,7 +261,7 @@ def create_post(channel_id: str, text: str, image_url: str, alt_text: str) -> No
                 "channelId": channel_id,
                 "schedulingType": "automatic",
                 "mode": "shareNow",
-                "assets": [{"image": {"url": image_url, "altText": alt_text}}],
+                "assets": [{"image": {"url": image_url}}],
             }
         },
     )
@@ -283,15 +279,15 @@ def main() -> None:
         # 1. Bugünün konseptini / özel gününü ve hashtag'lerini belirle
         prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
 
-        # 2. Gemini ile temaya uygun metin üret
+        # 2. Gemini-3.8-flash ile metin üret
         fact = generate_nature_fact(prompt_instruction)
         text = fact + "\n\n" + hashtags
 
-        # 3. Temaya ve mevsime uygun HD görsel ve Alt-Text çek
-        image_url, alt_text = get_unsplash_image_and_alt(concept_keywords)
+        # 3. Temaya ve mevsime uygun HD görsel çek
+        image_url = get_unsplash_image_url(concept_keywords)
 
         # 4. Buffer üzerinden paylaş
-        create_post(channel_id, text, image_url, alt_text)
+        create_post(channel_id, text, image_url)
 
         # 5. Telegram Bildirimi
         send_telegram_notification(text, image_url)
