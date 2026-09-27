@@ -37,8 +37,8 @@ def generate_nature_fact() -> str:
         "Uzunluğu maksimum 200 karakter olsun."
     )
     
-    # Güncel ve geçerli modeller
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash"]
+    # API hata mesajında doğrudan tavsiye edilen güncel model
+    models_to_try = ["gemini-3.8-flash"]
     
     for model_name in models_to_try:
         for attempt in range(3):
@@ -165,4 +165,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
