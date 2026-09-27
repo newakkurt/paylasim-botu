@@ -3,7 +3,7 @@ name: Nature Bot Daily Post
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # her gün 09:00 UTC (TR saatiyle 12:00, yaz saati 12:00/kış 12:00)
+    - cron: "0 9 * * *"   # her gün 09:00 UTC (TR saatiyle 12:00)
   workflow_dispatch: {}     # GitHub Actions sekmesinden elle de tetiklenebilir
 
 jobs:
@@ -20,10 +20,5 @@ jobs:
 
       - run: python twitter_nature_bot.py
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
-          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
-          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
-          TWITTER_ACCESS_SECRET: ${{ secrets.TWITTER_ACCESS_SECRET }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
