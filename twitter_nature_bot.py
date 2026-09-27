@@ -84,7 +84,7 @@ def get_organization_id() -> str:
 def get_twitter_channel_id(organization_id: str) -> str:
     data = buffer_graphql(
         """
-        query GetChannels($organizationId: String!) {
+        query GetChannels($organizationId: OrganizationId!) {
           channels(input: { organizationId: $organizationId }) {
             id
             name
