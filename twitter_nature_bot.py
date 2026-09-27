@@ -14,61 +14,81 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-HASHTAGS = "#doğa #orman #nature #forest #earth"
+BASE_HASHTAGS = "#doğa #nature #earth"
+
+# 1. Uluslararası Doğa ve Çevre Günleri Takvimi (Ay, Gün)
+SPECIAL_ENVIRONMENTAL_DAYS = {
+    (3, 3): ("Dünya Yaban Hayatı Günü", "#DünyaYabanHayatıGünü", "yaban hayatı ve koruma altındaki canlı türleri"),
+    (3, 21): ("Dünya Ormancılık Günü", "#DünyaOrmancılıkGünü", "dünyanın ormanları ve ağaçların hayati önemi"),
+    (3, 22): ("Dünya Su Günü", "#DünyaSuGünü", "su kaynakları, nehirler ve su ekosistemleri"),
+    (4, 22): ("Dünya Günü (Earth Day)", "#DünyaGünü #EarthDay", "gezegenimizin ekosistemi ve doğayı koruma bilinci"),
+    (5, 20): ("Dünya Arı Günü", "#DünyaArıGünü", "arılar, tozlaşma ve yaşamın devamındaki kritik rolleri"),
+    (5, 22): ("Dünya Biyoçeşitlilik Günü", "#BiyoçeşitlilikGünü", "gezegenimizdeki canlı türlerinin zenginliği"),
+    (6, 5): ("Dünya Çevre Günü", "#DünyaÇevreGünü", "çevre bilinci ve doğanın korunması"),
+    (6, 8): ("Dünya Okyanus Günü", "#DünyaOkyanusGünü", "okyanuslar, denizler ve su altı yaşamı"),
+    (10, 4): ("Dünya Hayvanları Koruma Günü", "#DünyaHayvanlarıKorumaGünü", "hayvanlar alemi ve onları koruma çabaları"),
+    (12, 11): ("Dünya Dağ Günü", "#DünyaDağGünü", "dağlar, yüksek ekosistemler ve dağ yaşamı"),
+}
+
+# 2. Haftanın Günlerine Özel Konseptler
+WEEKDAY_CONCEPTS = {
+    0: ("Dev Ağaçlar ve Ormanlar", "#ForestMonday", ["giant trees", "ancient forest", "redwood trees", "deep woods"]),
+    1: ("Büyüleyici Bitkiler ve Mantarlar", "#PlantTuesday", ["exotic plants", "rare flowers", "bioluminescent mushroom", "botanical nature"]),
+    2: ("Yaban Hayatı ve Doğa Canlıları", "#WildlifeWednesday", ["wildlife nature", "wild animals", "forest animals", "jungle wildlife"]),
+    3: ("Dağlar, Vadiler ve Doğal Oluşumlar", "#EarthThursday", ["majestic mountains", "canyons landscape", "nature valley", "geological wonders"]),
+    4: ("Okyanuslar, Denizler ve Su Altı", "#OceanFriday", ["ocean life", "coral reef", "underwater nature", "deep sea beauty"]),
+    5: ("Kuşlar ve Gökyüzü Canlıları", "#SkySaturday", ["wild birds", "soaring eagle", "exotic birds", "birds in nature"]),
+    6: ("Biyoçeşitlilik ve Ekosistemler", "#NatureSunday", ["biodiversity nature", "rainforest ecosystem", "pristine nature", "wild landscape"]),
+}
 
 
 def get_seasonal_keywords() -> list[str]:
-    """Bulunulan aya göre mevsimsel Unsplash arama kelimelerini döndürür."""
+    """Aya göre mevsimsel Unsplash kelimelerini döndürür."""
     month = datetime.now().month
-
-    if month in (12, 1, 2):  # Kış
-        print("Mevsim Algılandı: Kış (Winter) görselleri seçiliyor...")
-        return [
-            "winter forest",
-            "snowy trees",
-            "frozen lake",
-            "snow nature landscape",
-            "pine trees snow",
-        ]
-    elif month in (3, 4, 5):  # İlkbahar
-        print("Mevsim Algılandı: İlkbahar (Spring) görselleri seçiliyor...")
-        return [
-            "spring forest",
-            "blooming trees",
-            "cherry blossom nature",
-            "fresh green forest",
-            "spring wildflowers",
-        ]
-    elif month in (6, 7, 8):  # Yaz
-        print("Mevsim Algılandı: Yaz (Summer) görselleri seçiliyor...")
-        return [
-            "summer forest",
-            "tropical jungle",
-            "sunny nature landscape",
-            "lush green forest",
-            "waterfall summer",
-        ]
-    else:  # Sonbahar (9, 10, 11)
-        print("Mevsim Algılandı: Sonbahar (Autumn/Fall) görselleri seçiliyor...")
-        return [
-            "autumn forest",
-            "fall foliage",
-            "golden forest landscape",
-            "yellow leaves forest",
-            "misty autumn woods",
-        ]
+    if month in (12, 1, 2):
+        return ["winter", "snow", "frozen"]
+    elif month in (3, 4, 5):
+        return ["spring", "blooming", "fresh green"]
+    elif month in (6, 7, 8):
+        return ["summer", "sunny", "lush green"]
+    else:
+        return ["autumn", "fall foliage", "golden leaves"]
 
 
-def generate_nature_fact() -> str:
-    """Google Gemini API kullanarak bilgi ve etkileşim artırıcı soru üretir."""
+def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
+    """Günün özel çevre günü veya haftalık konsept durumunu belirler."""
+    now = datetime.now()
+    today_key = (now.month, now.day)
+
+    # Özel Çevre Günü Kontrolü
+    if today_key in SPECIAL_ENVIRONMENTAL_DAYS:
+        event_name, hashtag, focus = SPECIAL_ENVIRONMENTAL_DAYS[today_key]
+        print(f"🎉 Özel Gün Algılandı: {event_name}")
+        full_hashtags = f"{hashtag} {BASE_HASHTAGS}"
+        prompt_instruction = f"Bugün {event_name}! Özellikle {focus} hakkında ilginç, etkileyici ve bugünün anlam ve önemine uygun bir bilgi yaz."
+        search_keywords = [focus, "nature landscape", "environment"]
+        return prompt_instruction, full_hashtags, search_keywords
+
+    # Haftalık Günlük Konsept Kontrolü
+    weekday = now.weekday()
+    concept_name, concept_hashtag, concept_keywords = WEEKDAY_CONCEPTS[weekday]
+    print(f"📅 Günlük Konsept Algılandı ({now.strftime('%A')}): {concept_name}")
+    full_hashtags = f"{concept_hashtag} {BASE_HASHTAGS}"
+    prompt_instruction = f"Bugünün teması '{concept_name}'. Özellikle bu konu hakkında ilginç, az bilinen bir bilgi yaz."
+    
+    return prompt_instruction, full_hashtags, concept_keywords
+
+
+def generate_nature_fact(prompt_instruction: str) -> str:
+    """Google Gemini API kullanarak konsept odaklı bilgi ve etkileşim sorusu üretir."""
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = (
-        "Doğa, ormanlar, bitkiler veya orman canlıları hakkında ilginç, az bilinen, merak uyandırıcı 1 adet Türkçe bilgi yaz. "
+        f"{prompt_instruction}\n"
         "Bilginin hemen ardından takipçilerin yorum yazmasını sağlayacak tatlı, samimi ve merak uyandırıcı kısa bir soru ekle "
         "(Örnek: 'Siz hayatınızda gördüğünüz en yaşlı ağacı hatırlıyor musunuz? 🌿'). "
         "Direkt metinle başla. Giriş/çıkış açıklaması yapma, tırnak işareti veya 'İşte bilgi:' gibi ifadeler kullanma. "
-        "Toplam uzunluk maksimum 230 karakter olsun."
+        "Toplam uzunluk maksimum 220 karakter olsun."
     )
 
     models_to_try = ["gemini-3.8-flash"]
@@ -89,17 +109,40 @@ def generate_nature_fact() -> str:
     raise RuntimeError("Gemini API tüm denemelere rağmen yanıt veremedi.")
 
 
+def get_unsplash_image_and_alt(concept_keywords: list[str]) -> tuple[str, str]:
+    """Mevsim ve günün konseptini harmanlayarak Unsplash'ten görsel ve Alt-Text çeker."""
+    seasonal_words = get_seasonal_keywords()
+    selected_concept = random.choice(concept_keywords)
+    selected_season = random.choice(seasonal_words)
+    query_str = f"{selected_season} {selected_concept}"
+    
+    print(f"Unsplash araması yapılıyor: '{query_str}'")
+
+    resp = requests.get(
+        "https://api.unsplash.com/photos/random",
+        params={"query": query_str, "orientation": "landscape"},
+        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    
+    image_url = data["urls"]["regular"]
+    alt_text = data.get("alt_description") or data.get("description") or "Doğa manzarası fotoğrafı"
+    
+    return image_url, alt_text
+
+
 def send_telegram_notification(text: str, image_url: str) -> None:
-    """Paylaşım yapıldığında Telegram hesabınıza bilgilendirme mesajı gönderir."""
+    """Paylaşım başarılı olduğunda Telegram'a bildirim atar."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram ayarları eksik olduğu için bildirim atlandı.")
         return
 
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     caption = f"✅ **Yeni X (Twitter) Paylaşımı Yapıldı!**\n\n{text}"
 
     try:
-        resp = requests.post(
+        requests.post(
             telegram_url,
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
@@ -109,14 +152,13 @@ def send_telegram_notification(text: str, image_url: str) -> None:
             },
             timeout=10,
         )
-        resp.raise_for_status()
         print("Telegram başarı bildirimi gönderildi!")
     except Exception as e:
         print(f"Telegram bildirim hatası: {e}")
 
 
 def send_telegram_error(error_message: str) -> None:
-    """Hata durumunda Telegram hesabınıza otomatik uyarı mesajı gönderir."""
+    """Hata durumunda Telegram'a otomatik kırmızı uyarı gönderir."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
@@ -188,23 +230,8 @@ def get_twitter_channel_id(organization_id: str) -> str:
     raise RuntimeError("Buffer hesabına bağlı bir X/Twitter kanalı bulunamadı.")
 
 
-def get_unsplash_image_url() -> str:
-    """Mevsime uygun kelimelerden birini seçerek HD fotoğraf çeker."""
-    keywords = get_seasonal_keywords()
-    selected_query = random.choice(keywords)
-    print(f"Unsplash araması yapılıyor: '{selected_query}'")
-
-    resp = requests.get(
-        "https://api.unsplash.com/photos/random",
-        params={"query": selected_query, "orientation": "landscape"},
-        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()["urls"]["regular"]
-
-
-def create_post(channel_id: str, text: str, image_url: str) -> None:
+def create_post(channel_id: str, text: str, image_url: str, alt_text: str) -> None:
+    """Buffer üzerinden X gönderisi ve Alt-Text paylaşımı yapar."""
     data = buffer_graphql(
         """
         mutation CreatePost($input: CreatePostInput!) {
@@ -224,7 +251,7 @@ def create_post(channel_id: str, text: str, image_url: str) -> None:
                 "channelId": channel_id,
                 "schedulingType": "automatic",
                 "mode": "shareNow",
-                "assets": [{"image": {"url": image_url}}],
+                "assets": [{"image": {"url": image_url, "altText": alt_text}}],
             }
         },
     )
@@ -239,23 +266,25 @@ def main() -> None:
         org_id = get_organization_id()
         channel_id = get_twitter_channel_id(org_id)
 
-        # 1. Gemini ile etkileşim soruları içeren taze bilgi üretimi
-        fact = generate_nature_fact()
-        text = fact + "\n\n" + HASHTAGS
+        # 1. Bugünün konseptini / özel gününü ve hashtag'lerini belirle
+        prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
 
-        # 2. Bulunulan mevsime uygun HD Unsplash görseli çekimi
-        image_url = get_unsplash_image_url()
+        # 2. Gemini ile temaya uygun metin üret
+        fact = generate_nature_fact(prompt_instruction)
+        text = fact + "\n\n" + hashtags
 
-        # 3. Buffer üzerinden X (Twitter) paylaşımı
-        create_post(channel_id, text, image_url)
+        # 3. Temaya ve mevsime uygun HD görsel ve Alt-Text çek
+        image_url, alt_text = get_unsplash_image_and_alt(concept_keywords)
 
-        # 4. Telegram Başarı Bildirimi Gönderimi
+        # 4. Buffer üzerinden paylaş
+        create_post(channel_id, text, image_url, alt_text)
+
+        # 5. Telegram Bildirimi
         send_telegram_notification(text, image_url)
 
     except Exception as e:
         error_msg = str(e)
         print(f"Kritik Hata: {error_msg}")
-        # Otomatik Hata Bildirimi Gönder
         send_telegram_error(error_msg)
         raise e
 
