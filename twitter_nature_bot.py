@@ -9,9 +9,12 @@ BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
 UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
+# Telegram Ayarları (Varsa çalışır, yoksa hata vermeden atlar)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
 HASHTAGS = "#doğa #orman #nature #forest #earth"
 
-# Unsplash araması için geniş doğa konuları havuzu
 NATURE_KEYWORDS = [
     "forest",
     "rainforest",
@@ -37,8 +40,7 @@ def generate_nature_fact() -> str:
         "Uzunluğu maksimum 200 karakter olsun."
     )
     
-    # API hata mesajında doğrudan tavsiye edilen güncel model
-    models_to_try = ["gemini-3.8-flash"]
+    models_to_try = ["gemini-2.5-flash"]
     
     for model_name in models_to_try:
         for attempt in range(3):
@@ -54,6 +56,32 @@ def generate_nature_fact() -> str:
                 time.sleep(3)
                 
     raise RuntimeError("Gemini API tüm denemelere rağmen yanıt veremedi.")
+
+
+def send_telegram_notification(text: str, image_url: str) -> None:
+    """Paylaşım yapıldığında Telegram hesabınıza bilgilendirme mesajı gönderir."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram ayarları eksik olduğu için bildirim atlandı.")
+        return
+
+    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    caption = f"✅ **Yeni X (Twitter) Paylaşımı Yapıldı!**\n\n{text}"
+    
+    try:
+        resp = requests.post(
+            telegram_url,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "photo": image_url,
+                "caption": caption,
+                "parse_mode": "Markdown",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        print("Telegram bildirimi başarıyla gönderildi!")
+    except Exception as e:
+        print(f"Telegram bildirim hatası: {e}")
 
 
 def buffer_graphql(query: str, variables: dict | None = None) -> dict:
@@ -153,14 +181,18 @@ def main() -> None:
     org_id = get_organization_id()
     channel_id = get_twitter_channel_id(org_id)
     
-    # Gemini ile taze bilgi üretimi
+    # 1. Gemini ile taze bilgi üretimi
     fact = generate_nature_fact()
     text = fact + "\n\n" + HASHTAGS
     
-    # Rastgele doğa konusuna göre HD Unsplash görseli çekimi
+    # 2. Rastgele doğa konusuna göre HD Unsplash görseli çekimi
     image_url = get_unsplash_image_url()
     
+    # 3. Buffer üzerinden X (Twitter) paylaşımı
     create_post(channel_id, text, image_url)
+    
+    # 4. Telegram Bildirimi Gönderimi
+    send_telegram_notification(text, image_url)
 
 
 if __name__ == "__main__":
