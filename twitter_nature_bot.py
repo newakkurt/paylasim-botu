@@ -9,7 +9,7 @@ BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
 UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-# Telegram Ayarları (Varsa çalışır, yoksa hata vermeden atlar)
+# Telegram Ayarları
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -40,7 +40,8 @@ def generate_nature_fact() -> str:
         "Uzunluğu maksimum 200 karakter olsun."
     )
     
-    models_to_try = ["gemini-2.5-flash"]
+    # API tarafından önerilen güncel model
+    models_to_try = ["gemini-3.8-flash"]
     
     for model_name in models_to_try:
         for attempt in range(3):
