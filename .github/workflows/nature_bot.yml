@@ -2,7 +2,7 @@ name: Nature Bot Daily Post
 
 on:
   schedule:
-    - cron: "12 9,15,21 * * *"
+    - cron: "5 10 * * *"
   workflow_dispatch: {}
 
 jobs:
