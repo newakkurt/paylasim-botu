@@ -156,10 +156,6 @@ def commit_video_and_get_url(video_path: str) -> str:
     subprocess.run(["cp", video_path, dest_path], check=True)
 
     subprocess.run(["git", "config", "user.name", "nature-video-bot"], check=True)
-    subprocess.run(["git", "config", "user.email", "bot@users.noreply.github.com"], check=True)
-    subprocess.run(["git", "add", dest_path], check=True)
-    subprocess.run(["git", "commit", "-m", "Yeni doğa videosu", "--allow-empty"], check=True)
-    subprocess.run(["git", "push"], check=True)
 
     return f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{dest_path}"
 
