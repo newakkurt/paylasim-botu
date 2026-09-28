@@ -1,24 +1,35 @@
 """
-Telegram Kontrol Paneli - Render.com Uyumlu (7/24 Aktif)
---------------------------------------------------
-Telegram botuna gelen komut mesajlarını kontrol eder, tanıdığı bir komut
-görürse ilgili paylaşım scriptini hemen çalıştırır.
-
-Komutlar (Telegram'da bota mesaj olarak yaz):
-  /paylas        -> normal bilgi + görsel paylaşımı (twitter_nature_bot.py)
-  /hava          -> hava durumu paylaşımı (weather_bot.py)
-  /video         -> doğa videosu paylaşımı (video_bot.py)
-
-Gerekli ortam değişkenleri:
-  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+Telegram Kontrol Paneli - Render.com Ücretsiz Web Service Uyumlu (7/24 Aktif)
+------------------------------------------------------------------------
 """
 
 import json
 import os
 import subprocess
+import threading
 import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import requests
+
+# Render'ın port kontrolünü geçmek için ücretsiz sahte HTTP sunucusu
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is active 24/7!")
+
+    def log_message(self, format, *args):
+        return  # Log kirliliği yapmaması için HTTP istek loglarını gizle
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
+# HTTP sunucusunu ayrı bir thread'de başlat
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
@@ -96,7 +107,7 @@ def process_updates(offset: int) -> int:
         text = message.get("text", "").strip().lower()
 
         if chat_id != str(TELEGRAM_CHAT_ID):
-            continue  # sadece yetkili chat'ten gelen komutları işle
+            continue
 
         if text in COMMANDS:
             script = COMMANDS[text]
@@ -115,13 +126,12 @@ def main() -> None:
     print("🤖 Telegram Kontrol Botu başlatıldı. Komutlar dinleniyor...")
     offset = load_offset()
     
-    # Render üzerinde sürekli çalışması için sonsuz döngü (Polling)
     while True:
         try:
             offset = process_updates(offset)
         except Exception as e:
             print("Döngü hatası:", e)
-        time.sleep(2)  # Sunucuyu yormamak için her kontrol arası 2 saniye bekle
+        time.sleep(2)
 
 
 if __name__ == "__main__":
