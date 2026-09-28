@@ -126,15 +126,27 @@ def generate_with_groq(prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"].strip()
 
 
+ENGAGEMENT_QUESTIONS = [
+    "Siz hayatınızda gördüğünüz en yaşlı ağacı hatırlıyor musunuz? 🌳",
+    "Bu bilgiyi daha önce biliyor muydunuz? 🤔",
+    "Sizce doğanın en şaşırtıcı sırrı hangisi? 🌿",
+    "Bugüne kadar gördüğünüz en etkileyici doğa manzarası neresiydi? 🏞️",
+    "Bu türü daha önce hiç görme şansınız oldu mu? 👀",
+    "Doğada en çok hangi canlıyı gözlemlemeyi seversiniz? 🦋",
+    "Bu bilgi sizi de benim kadar şaşırttı mı? ✨",
+    "Sizce ormanların en kıymetli hazinesi ne olabilir? 🌲",
+]
+
+
 def generate_nature_fact(prompt_instruction: str) -> str:
     """1. Gemini (ücretsiz), 2. Groq (ücretsiz), 3. sabit bilgi havuzu (ücretsiz)
-    sırasıyla dener. Hiçbir aşamada ücretli bir servis kullanılmıyor."""
+    sırasıyla dener. Sadece BİLGİ metnini döndürür, soru artık ayrı bir yorum
+    (reply) olarak paylaşılıyor."""
     prompt = (
         f"{prompt_instruction}\n"
-        "Bilginin hemen ardından takipçilerin yorum yazmasını sağlayacak tatlı, samimi ve merak uyandırıcı kısa bir soru ekle "
-        "(Örnek: 'Siz hayatınızda gördüğünüz en yaşlı ağacı hatırlıyor musunuz? 🌿'). "
-        "Direkt metinle başla. Giriş/çıkış açıklaması yapma, tırnak işareti veya 'İşte bilgi:' gibi ifadeler kullanma. "
-        "Toplam uzunluk maksimum 220 karakter olsun."
+        "Direkt metinle başla. Giriş/çıkış açıklaması yapma, tırnak işareti veya "
+        "'İşte bilgi:' gibi ifadeler kullanma. Soru EKLEME, sadece bilgiyi yaz. "
+        "Toplam uzunluk maksimum 200 karakter olsun."
     )
 
     if GEMINI_API_KEY:
@@ -269,7 +281,26 @@ def get_channel_ids(organization_id: str) -> dict[str, str]:
     return channels
 
 
-def create_post(channel_id: str, text: str, image_url: str) -> None:
+def create_post(channel_id: str, text: str, image_url: str, reply_text: str | None = None) -> None:
+    """Post oluşturur. reply_text verilirse (ve servis X ise) soru, ana
+    paylaşımın altına ayrı bir yorum (thread) olarak eklenir."""
+    input_data = {
+        "text": text,
+        "channelId": channel_id,
+        "schedulingType": "automatic",
+        "mode": "shareNow",
+        "assets": [{"image": {"url": image_url}}],
+    }
+    if reply_text:
+        input_data["metadata"] = {
+            "twitter": {
+                "thread": [
+                    {"text": text},
+                    {"text": reply_text},
+                ]
+            }
+        }
+
     data = buffer_graphql(
         """
         mutation CreatePost($input: CreatePostInput!) {
@@ -283,15 +314,7 @@ def create_post(channel_id: str, text: str, image_url: str) -> None:
           }
         }
         """,
-        {
-            "input": {
-                "text": text,
-                "channelId": channel_id,
-                "schedulingType": "automatic",
-                "mode": "shareNow",
-                "assets": [{"image": {"url": image_url}}],
-            }
-        },
+        {"input": input_data},
     )
     result = data["createPost"]
     if "message" in result:
@@ -307,10 +330,11 @@ def main() -> None:
         prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
         fact = generate_nature_fact(prompt_instruction)
         text = fact + "\n\n" + hashtags
+        question = random.choice(ENGAGEMENT_QUESTIONS)
         image_url = get_unsplash_image_url(concept_keywords)
 
         if "twitter" in channels:
-            create_post(channels["twitter"], text, image_url)
+            create_post(channels["twitter"], text, image_url, reply_text=question)
         else:
             print("Uyarı: Buffer'a bağlı bir X/Twitter kanalı bulunamadı, atlanıyor.")
 
