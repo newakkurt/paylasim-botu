@@ -4,21 +4,52 @@ import time
 import requests
 from datetime import datetime
 from google import genai
-import anthropic
 
 BUFFER_API_URL = "https://api.buffer.com"
 BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
 UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Telegram Ayarları
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 BASE_HASHTAGS = "#doğa #nature #earth"
 
-# 1. Uluslararası Doğa ve Çevre Günleri Takvimi (Ay, Gün)
+# Gemini başarısız olursa kullanılan ÜCRETSİZ yedek bilgi havuzu (hiçbir API/ücret gerektirmez)
+FALLBACK_FACTS = [
+    "Bir ağaç yılda ortalama 22 kilogram karbondioksit emer ve karşılığında oksijen üretir.",
+    "Amazon Ormanları dünyadaki oksijenin yaklaşık %20'sini üretir, bu yüzden 'dünyanın akciğerleri' olarak anılır.",
+    "Mantarlar, yer altında dev bir ağ oluşturarak ağaçların birbiriyle besin ve bilgi alışverişi yapmasını sağlar.",
+    "Sekoya ağaçları 100 metreyi aşan boylara ulaşabilir ve 3000 yıldan fazla yaşayabilir.",
+    "Bir meşe ağacı, yaşamı boyunca yaklaşık 10 milyon adet meşe palamudu üretebilir.",
+    "Orman toprağının sadece bir avucunda, dünya nüfusundan daha fazla mikroorganizma bulunur.",
+    "Kelebekler ayaklarıyla tat alır; bir çiçeğe konduklarında onu ayaklarıyla tadarlar.",
+    "Baykuşlar boyunlarını 270 dereceye kadar çevirebilir çünkü göz küreleri hareket etmez.",
+    "Bambü, dünyanın en hızlı büyüyen bitkisidir; bazı türleri günde 90 santimetre büyüyebilir.",
+    "Bir karınca kendi ağırlığının 50 katına kadar yük taşıyabilir.",
+    "Deniz otu çayırları, tropik yağmur ormanlarından bile daha hızlı karbon depolayabilir.",
+    "Ağaçlar birbirlerine kimyasal sinyaller göndererek zararlı böcek saldırılarına karşı komşularını uyarabilir.",
+    "Bal arıları, kovanlarına dönüş yolunu bulmak için Güneş'in konumunu pusula gibi kullanır.",
+    "Kutup ayılarının derisi aslında siyahtır; kürkleri ışığı yansıttığı için beyaz görünür.",
+    "Fillerin ayak tabanlarındaki hassas sinirler, kilometrelerce uzaktaki depremleri algılayabilir.",
+    "Dünyadaki tüm canlı biyokütlenin yarısından fazlasını bitkiler oluşturur.",
+    "Ahtapotlar üç kalbe sahiptir; ikisi solungaçlara, biri vücudun geri kalanına kan pompalar.",
+    "Kunduzların yaptığı barajlar, zamanla küçük göller oluşturarak yüzlerce türe yaşam alanı sağlar.",
+    "Yarasalar, tozlaşmadan tohum yayılımına kadar birçok tropik bitkinin hayatta kalması için kritik öneme sahiptir.",
+    "Denizanaları 500 milyon yıldan uzun süredir var olan, dinozorlardan bile daha eski canlılardır.",
+    "Bir tek balina, yaşamı boyunca karbondioksit tutma açısından binlerce ağaca bedel olabilir.",
+    "Panda ayıları günde 12 saate kadar sadece bambu yiyerek geçirebilir.",
+    "Mercan resifleri, okyanus tabanının yalnızca küçük bir kısmını kaplamasına rağmen deniz canlılarının çeyreğine ev sahipliği yapar.",
+    "Bir çita, saatte 110 kilometreye kadar hız yapabilir ama bu hızı yalnızca birkaç saniye sürdürebilir.",
+    "Bir semender, kopan bir uzvunu yeniden büyütebilir.",
+    "Deniz kaplumbağaları, doğdukları plaja yıllar sonra yumurtlamak için geri dönebilir.",
+    "Timsahlar, dişlerini yaşamları boyunca defalarca yenileyebilir.",
+    "Ağustosböcekleri, toprak altında 17 yıla kadar larva olarak yaşayabilir.",
+    "Yunuslar, birbirlerini tanımak için özel ıslık sesleri (imza ıslıkları) kullanır.",
+    "Denizatları, yumurtaları erkek bireyin karnında taşıması ve doğurmasıyla hayvanlar aleminde eşsizdir.",
+]
+
 SPECIAL_ENVIRONMENTAL_DAYS = {
     (3, 3): ("Dünya Yaban Hayatı Günü", "#DünyaYabanHayatıGünü", "yaban hayatı ve koruma altındaki canlı türleri"),
     (3, 21): ("Dünya Ormancılık Günü", "#DünyaOrmancılıkGünü", "dünyanın ormanları ve ağaçların hayati önemi"),
@@ -32,7 +63,6 @@ SPECIAL_ENVIRONMENTAL_DAYS = {
     (12, 11): ("Dünya Dağ Günü", "#DünyaDağGünü", "dağlar, yüksek ekosistemler ve dağ yaşamı"),
 }
 
-# 2. Haftanın Günlerine Özel Konseptler
 WEEKDAY_CONCEPTS = {
     0: ("Dev Ağaçlar ve Ormanlar", "#ForestMonday", ["forest", "trees", "woodland"]),
     1: ("Büyüleyici Bitkiler ve Mantarlar", "#PlantTuesday", ["plants", "flowers", "mushrooms"]),
@@ -45,7 +75,6 @@ WEEKDAY_CONCEPTS = {
 
 
 def get_seasonal_keywords() -> list[str]:
-    """Aya göre mevsimsel Unsplash kelimelerini döndürür."""
     month = datetime.now().month
     if month in (12, 1, 2):
         return ["winter", "snow"]
@@ -58,11 +87,9 @@ def get_seasonal_keywords() -> list[str]:
 
 
 def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
-    """Günün özel çevre günü veya haftalık konsept durumunu belirler."""
     now = datetime.now()
     today_key = (now.month, now.day)
 
-    # Özel Çevre Günü Kontrolü
     if today_key in SPECIAL_ENVIRONMENTAL_DAYS:
         event_name, hashtag, focus = SPECIAL_ENVIRONMENTAL_DAYS[today_key]
         print(f"🎉 Özel Gün Algılandı: {event_name}")
@@ -71,36 +98,37 @@ def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
         search_keywords = ["nature", "environment"]
         return prompt_instruction, full_hashtags, search_keywords
 
-    # Haftalık Günlük Konsept Kontrolü
     weekday = now.weekday()
     concept_name, concept_hashtag, concept_keywords = WEEKDAY_CONCEPTS[weekday]
     print(f"📅 Günlük Konsept Algılandı ({now.strftime('%A')}): {concept_name}")
     full_hashtags = f"{concept_hashtag} {BASE_HASHTAGS}"
     prompt_instruction = f"Bugünün teması '{concept_name}'. Özellikle bu konu hakkında ilginç, az bilinen bir bilgi yaz."
-    
+
     return prompt_instruction, full_hashtags, concept_keywords
 
 
-def generate_with_claude(prompt: str) -> str:
-    """Gemini çöktüğünde yedek olarak Claude API çağrısı yapar."""
-    if not ANTHROPIC_API_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY tanımlanmamış, Claude yedekleme kullanılamıyor.")
-    
-    print("🤖 Claude API yedek mekanizması devreye giriyor...")
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    
-    message = client.messages.create(
-        model="claude-3-haiku-20240307",
-        max_tokens=300,
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
+def generate_with_groq(prompt: str) -> str:
+    """Groq API ile dener (tamamen ücretsiz katman, kredi kartı gerektirmez)."""
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY tanımlanmamış.")
+
+    resp = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+        json={
+            "model": "llama-3.3-70b-versatile",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 300,
+        },
+        timeout=20,
     )
-    return message.content[0].text.strip()
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"].strip()
 
 
 def generate_nature_fact(prompt_instruction: str) -> str:
-    """Google Gemini API ile dener, başarısız olursa Claude API'ye düşer."""
+    """1. Gemini (ücretsiz), 2. Groq (ücretsiz), 3. sabit bilgi havuzu (ücretsiz)
+    sırasıyla dener. Hiçbir aşamada ücretli bir servis kullanılmıyor."""
     prompt = (
         f"{prompt_instruction}\n"
         "Bilginin hemen ardından takipçilerin yorum yazmasını sağlayacak tatlı, samimi ve merak uyandırıcı kısa bir soru ekle "
@@ -109,33 +137,29 @@ def generate_nature_fact(prompt_instruction: str) -> str:
         "Toplam uzunluk maksimum 220 karakter olsun."
     )
 
-    # 1. Öncelik: Gemini API
     if GEMINI_API_KEY:
         client = genai.Client(api_key=GEMINI_API_KEY)
-        model_name = "gemini-3.8-flash"
-
+        model_name = "gemini-2.0-flash"
         for attempt in range(3):
             try:
                 print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
+                response = client.models.generate_content(model=model_name, contents=prompt)
                 return response.text.strip()
             except Exception as e:
                 print(f"Gemini API uyarısı ({model_name}): {e}")
-                time.sleep(2)
+                time.sleep(5)
 
-    # 2. Öncelik (Yedek): Claude API
-    print("⚠️ Gemini yanıt veremedi veya hata aldı. Claude API'ye geçiliyor...")
+    print("⚠️ Gemini yanıt veremedi. Groq API'ye geçiliyor (ücretsiz)...")
     try:
-        return generate_with_claude(prompt)
+        return generate_with_groq(prompt)
     except Exception as e:
-        raise RuntimeError(f"Hem Gemini hem Claude API başarısız oldu. Claude Hatası: {e}")
+        print(f"Groq API uyarısı: {e}")
+
+    print("⚠️ Groq da yanıt veremedi. Ücretsiz sabit bilgi havuzuna düşülüyor...")
+    return random.choice(FALLBACK_FACTS)
 
 
 def fetch_unsplash_photo(query_str: str) -> dict:
-    """Unsplash API'sinden fotoğraf verisini çeker."""
     resp = requests.get(
         "https://api.unsplash.com/photos/random",
         params={"query": query_str, "orientation": "landscape"},
@@ -147,14 +171,13 @@ def fetch_unsplash_photo(query_str: str) -> dict:
 
 
 def get_unsplash_image_url(concept_keywords: list[str]) -> str:
-    """Arama terimini basitleştirerek Unsplash'ten görsel çeker; hata durumunda varsayılan aramaya geçer."""
     selected_concept = random.choice(concept_keywords)
     selected_season = random.choice(get_seasonal_keywords())
-    
+
     query_candidates = [
         f"{selected_season} {selected_concept}",
         selected_concept,
-        "nature"
+        "nature",
     ]
 
     for query_str in query_candidates:
@@ -170,22 +193,14 @@ def get_unsplash_image_url(concept_keywords: list[str]) -> str:
 
 
 def send_telegram_notification(text: str, image_url: str) -> None:
-    """Paylaşım başarılı olduğunda Telegram'a bildirim atar."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
-
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    caption = f"✅ **Yeni X (Twitter) Paylaşımı Yapıldı!**\n\n{text}"
-
+    caption = f"✅ **Yeni Paylaşım Yapıldı!**\n\n{text}"
     try:
         requests.post(
             telegram_url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "photo": image_url,
-                "caption": caption,
-                "parse_mode": "Markdown",
-            },
+            json={"chat_id": TELEGRAM_CHAT_ID, "photo": image_url, "caption": caption, "parse_mode": "Markdown"},
             timeout=10,
         )
         print("Telegram başarı bildirimi gönderildi!")
@@ -194,25 +209,18 @@ def send_telegram_notification(text: str, image_url: str) -> None:
 
 
 def send_telegram_error(error_message: str) -> None:
-    """Hata durumunda Telegram'a otomatik kırmızı uyarı gönderir."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
-
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     text = (
         "⚠️ **Doğa Botu Hata Bildirimi!**\n\n"
         "Sistem otomatik paylaşım yaparken bir sorunla karşılaştı.\n\n"
         f"**Hata Detayı:**\n`{error_message}`"
     )
-
     try:
         requests.post(
             telegram_url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "Markdown",
-            },
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
             timeout=10,
         )
         print("Hata bildirimi Telegram'a gönderildi.")
@@ -223,10 +231,7 @@ def send_telegram_error(error_message: str) -> None:
 def buffer_graphql(query: str, variables: dict | None = None) -> dict:
     resp = requests.post(
         BUFFER_API_URL,
-        headers={
-            "Authorization": f"Bearer {BUFFER_API_KEY}",
-            "Content-Type": "application/json",
-        },
+        headers={"Authorization": f"Bearer {BUFFER_API_KEY}", "Content-Type": "application/json"},
         json={"query": query, "variables": variables or {}},
         timeout=20,
     )
@@ -238,36 +243,33 @@ def buffer_graphql(query: str, variables: dict | None = None) -> dict:
 
 
 def get_organization_id() -> str:
-    data = buffer_graphql(
-        "query GetOrganizations { account { organizations { id name } } }"
-    )
+    data = buffer_graphql("query GetOrganizations { account { organizations { id name } } }")
     orgs = data["account"]["organizations"]
     if not orgs:
         raise RuntimeError("Buffer hesabında hiç organizasyon bulunamadı.")
     return orgs[0]["id"]
 
 
-def get_twitter_channel_id(organization_id: str) -> str:
+def get_channel_ids(organization_id: str) -> dict[str, str]:
     data = buffer_graphql(
         """
         query GetChannels($organizationId: OrganizationId!) {
           channels(input: { organizationId: $organizationId }) {
             id
-            name
             service
           }
         }
         """,
         {"organizationId": organization_id},
     )
+    channels: dict[str, str] = {}
     for ch in data["channels"]:
-        if ch["service"] in ("twitter", "x"):
-            return ch["id"]
-    raise RuntimeError("Buffer hesabında bağlı bir X/Twitter kanalı bulunamadı.")
+        service = "twitter" if ch["service"] == "x" else ch["service"]
+        channels[service] = ch["id"]
+    return channels
 
 
 def create_post(channel_id: str, text: str, image_url: str) -> None:
-    """Buffer üzerinden X gönderisi paylaşımı yapar."""
     data = buffer_graphql(
         """
         mutation CreatePost($input: CreatePostInput!) {
@@ -300,22 +302,23 @@ def create_post(channel_id: str, text: str, image_url: str) -> None:
 def main() -> None:
     try:
         org_id = get_organization_id()
-        channel_id = get_twitter_channel_id(org_id)
+        channels = get_channel_ids(org_id)
 
-        # 1. Bugünün konseptini / özel gününü ve hashtag'lerini belirle
         prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
-
-        # 2. Gemini (veya yedek Claude) ile metin üret
         fact = generate_nature_fact(prompt_instruction)
         text = fact + "\n\n" + hashtags
-
-        # 3. Temaya ve mevsime uygun HD görsel çek
         image_url = get_unsplash_image_url(concept_keywords)
 
-        # 4. Buffer üzerinden paylaş
-        create_post(channel_id, text, image_url)
+        if "twitter" in channels:
+            create_post(channels["twitter"], text, image_url)
+        else:
+            print("Uyarı: Buffer'a bağlı bir X/Twitter kanalı bulunamadı, atlanıyor.")
 
-        # 5. Telegram Bildirimi
+        if "instagram" in channels:
+            create_post(channels["instagram"], text, image_url)
+        else:
+            print("Uyarı: Buffer'a bağlı bir Instagram kanalı bulunamadı, atlanıyor.")
+
         send_telegram_notification(text, image_url)
 
     except Exception as e:
