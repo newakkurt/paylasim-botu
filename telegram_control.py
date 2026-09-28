@@ -53,7 +53,6 @@ def commit_state() -> None:
         subprocess.run(["git", "config", "user.email", "bot@users.noreply.github.com"], check=True)
         subprocess.run(["git", "add", STATE_FILE], check=True)
         subprocess.run(["git", "commit", "-m", "Telegram offset güncellendi", "--allow-empty"], check=True)
-        subprocess.run(["git", "push"], check=True)
     except subprocess.CalledProcessError as e:
         print("Durum commit edilemedi (kritik değil):", e)
 
