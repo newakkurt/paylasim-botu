@@ -4,11 +4,13 @@ import time
 import requests
 from datetime import datetime
 from google import genai
+import anthropic
 
 BUFFER_API_URL = "https://api.buffer.com"
 BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
 UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 # Telegram Ayarları
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -79,10 +81,26 @@ def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
     return prompt_instruction, full_hashtags, concept_keywords
 
 
-def generate_nature_fact(prompt_instruction: str) -> str:
-    """Google Gemini API kullanarak gemini-3.8-flash modeli ile içerik üretir."""
-    client = genai.Client(api_key=GEMINI_API_KEY)
+def generate_with_claude(prompt: str) -> str:
+    """Gemini çöktüğünde yedek olarak Claude API çağrısı yapar."""
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY tanımlanmamış, Claude yedekleme kullanılamıyor.")
+    
+    print("🤖 Claude API yedek mekanizması devreye giriyor...")
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    
+    message = client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=300,
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return message.content[0].text.strip()
 
+
+def generate_nature_fact(prompt_instruction: str) -> str:
+    """Google Gemini API ile dener, başarısız olursa Claude API'ye düşer."""
     prompt = (
         f"{prompt_instruction}\n"
         "Bilginin hemen ardından takipçilerin yorum yazmasını sağlayacak tatlı, samimi ve merak uyandırıcı kısa bir soru ekle "
@@ -91,21 +109,29 @@ def generate_nature_fact(prompt_instruction: str) -> str:
         "Toplam uzunluk maksimum 220 karakter olsun."
     )
 
-    model_name = "gemini-3.8-flash"
+    # 1. Öncelik: Gemini API
+    if GEMINI_API_KEY:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        model_name = "gemini-3.8-flash"
 
-    for attempt in range(3):
-        try:
-            print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-            return response.text.strip()
-        except Exception as e:
-            print(f"Gemini API uyarısı ({model_name}): {e}")
-            time.sleep(3)
+        for attempt in range(3):
+            try:
+                print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                return response.text.strip()
+            except Exception as e:
+                print(f"Gemini API uyarısı ({model_name}): {e}")
+                time.sleep(2)
 
-    raise RuntimeError("Gemini API tüm denemelere rağmen yanıt veremedi.")
+    # 2. Öncelik (Yedek): Claude API
+    print("⚠️ Gemini yanıt veremedi veya hata aldı. Claude API'ye geçiliyor...")
+    try:
+        return generate_with_claude(prompt)
+    except Exception as e:
+        raise RuntimeError(f"Hem Gemini hem Claude API başarısız oldu. Claude Hatası: {e}")
 
 
 def fetch_unsplash_photo(query_str: str) -> dict:
@@ -279,7 +305,7 @@ def main() -> None:
         # 1. Bugünün konseptini / özel gününü ve hashtag'lerini belirle
         prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
 
-        # 2. Gemini-3.8-flash ile metin üret
+        # 2. Gemini (veya yedek Claude) ile metin üret
         fact = generate_nature_fact(prompt_instruction)
         text = fact + "\n\n" + hashtags
 
