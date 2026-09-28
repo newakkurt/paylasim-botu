@@ -1,6 +1,6 @@
 """
-Telegram Kontrol Paneli - tamamen ücretsiz
-----------------------------------------------
+Telegram Kontrol Paneli - Render.com Uyumlu (7/24 Aktif)
+--------------------------------------------------
 Telegram botuna gelen komut mesajlarını kontrol eder, tanıdığı bir komut
 görürse ilgili paylaşım scriptini hemen çalıştırır.
 
@@ -16,6 +16,7 @@ Gerekli ortam değişkenleri:
 import json
 import os
 import subprocess
+import time
 
 import requests
 
@@ -47,32 +48,29 @@ def save_offset(offset: int) -> None:
         json.dump({"offset": offset}, f)
 
 
-def commit_state() -> None:
-    try:
-        subprocess.run(["git", "config", "user.name", "telegram-control-bot"], check=True)
-        subprocess.run(["git", "config", "user.email", "bot@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", STATE_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "Telegram offset güncellendi", "--allow-empty"], check=True)
-    except subprocess.CalledProcessError as e:
-        print("Durum commit edilemedi (kritik değil):", e)
-
-
 def send_message(text: str) -> None:
-    requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        json={"chat_id": TELEGRAM_CHAT_ID, "text": text},
-        timeout=10,
-    )
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text},
+            timeout=10,
+        )
+    except Exception as e:
+        print("Telegram mesajı gönderilemedi:", e)
 
 
 def get_updates(offset: int) -> list[dict]:
-    resp = requests.get(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
-        params={"offset": offset, "timeout": 5},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json().get("result", [])
+    try:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"offset": offset, "timeout": 10},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", [])
+    except Exception as e:
+        print("Telegram updates alınırken hata oluştu:", e)
+        return []
 
 
 def run_script(script_name: str) -> tuple[bool, str]:
@@ -85,13 +83,10 @@ def run_script(script_name: str) -> tuple[bool, str]:
     return success, output
 
 
-def main() -> None:
-    offset = load_offset()
+def process_updates(offset: int) -> int:
     updates = get_updates(offset)
-
     if not updates:
-        print("Yeni mesaj yok.")
-        return
+        return offset
 
     new_offset = offset
     for update in updates:
@@ -113,7 +108,20 @@ def main() -> None:
                 send_message(f"❌ Hata oluştu ({text}):\n{output[:500]}")
 
     save_offset(new_offset)
-    commit_state()
+    return new_offset
+
+
+def main() -> None:
+    print("🤖 Telegram Kontrol Botu başlatıldı. Komutlar dinleniyor...")
+    offset = load_offset()
+    
+    # Render üzerinde sürekli çalışması için sonsuz döngü (Polling)
+    while True:
+        try:
+            offset = process_updates(offset)
+        except Exception as e:
+            print("Döngü hatası:", e)
+        time.sleep(2)  # Sunucuyu yormamak için her kontrol arası 2 saniye bekle
 
 
 if __name__ == "__main__":
