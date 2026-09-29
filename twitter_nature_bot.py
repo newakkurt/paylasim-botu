@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import requests
 from google import genai
 
@@ -50,7 +51,7 @@ def send_telegram_log(message: str):
 async def login():
     print("🔑 X oturumu kontrol ediliyor...")
 
-    # 1. Öncelik: Render Environment X_COOKIES_JSON (Esnek Format Destekli)
+    # 1. Öncelik: Render Environment X_COOKIES_JSON
     if X_COOKIES_JSON and X_COOKIES_JSON.strip():
         try:
             raw_cookies = json.loads(X_COOKIES_JSON.strip())
@@ -108,34 +109,37 @@ def generate_ai_tweet():
         " EKLEME."
     )
 
-    # 1. Öncelik: Gemini API (Gemini 3.8 Flash)
+    # 1. Öncelik: Gemini API (3 Defa Yeniden Deneme Mantığı ile)
     if GEMINI_API_KEY:
-        try:
-            ai_client = genai.Client(api_key=GEMINI_API_KEY)
-            response = ai_client.models.generate_content(
-                model="gemini-3.8-flash", contents=prompt
-            )
-            if response.text:
-                return response.text.strip(), "Gemini 3.8 Flash"
-        except Exception as e:
-            print(f"⚠️ Gemini tweet üretimi başarısız, Groq deneniyor: {e}")
-
-    # 2. Öncelik (Yedek): Groq API (Llama 3.1 8B Instant)
-    if GROQ_API_KEY and GROQ_AVAILABLE:
-        try:
-            groq_client = Groq(api_key=GROQ_API_KEY)
-            completion = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=150,
-            )
-            if completion.choices[0].message.content:
-                return completion.choices[0].message.content.strip(), (
-                    "Groq (Llama-3.1)"
+        for attempt in range(3):
+            try:
+                ai_client = genai.Client(api_key=GEMINI_API_KEY)
+                response = ai_client.models.generate_content(
+                    model="gemini-3.8-flash", contents=prompt
                 )
-        except Exception as e:
-            print(f"⚠️ Groq tweet üretimi başarısız: {e}")
+                if response.text:
+                    return response.text.strip(), "Gemini 3.8 Flash"
+            except Exception as e:
+                print(f"⚠️ Gemini deneme {attempt+1} başarısız: {e}")
+                time.sleep(2)
+
+    # 2. Öncelik (Yedek): Groq API (Aktif Llama 3.3 Modeli)
+    if GROQ_API_KEY and GROQ_AVAILABLE:
+        for model_name in ["llama-3.3-70b-versatile", "llama3-8b-8192"]:
+            try:
+                groq_client = Groq(api_key=GROQ_API_KEY)
+                completion = groq_client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=150,
+                )
+                if completion.choices[0].message.content:
+                    return completion.choices[0].message.content.strip(), (
+                        f"Groq ({model_name})"
+                    )
+            except Exception as e:
+                print(f"⚠️ Groq ({model_name}) başarısız: {e}")
 
     raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
 
