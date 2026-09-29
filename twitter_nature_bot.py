@@ -1,163 +1,34 @@
-import asyncio
-import json
-import os
-import sys
-import requests
-from google import genai
+[30.09.2026 00:38] Şevket: /paylas
+[30.09.2026 00:38] Doğa Paylaşım Botu: ⏳ Komut alındı: /paylas
+Çalıştırılıyor: twitter_nature_bot.py
+[30.09.2026 00:38] Doğa Paylaşım Botu: ❌ **Hata oluştu (/paylas):**
 
-# Groq kütüphanesi yüklü değilse botun çökmesini engeller
-try:
-    from groq import Groq
+📄 **Loglar:**
+```
+🔑 X oturumu kontrol ediliyor...
+✅ Environment 'X_COOKIES_JSON' üzerinden oturum yüklendi.
+⚠️️ Gemini tweet üretimi başarısız, Groq deneniyor: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.0-flash is no longer available. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}
+⚠️ Groq tweet üretimi başarısız: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
 
-    GROQ_AVAILABLE = True
-except ImportError:
-    GROQ_AVAILABLE = False
-
-from twikit import Client
-
-# Logların Telegram'a anında düşmesi için önbellek boşaltma
-sys.stdout.reconfigure(line_buffering=True)
-
-# Environment Değişkenleri
-X_USERNAME = os.environ.get("X_USERNAME")
-X_EMAIL = os.environ.get("X_EMAIL")
-X_PASSWORD = os.environ.get("X_PASSWORD")
-X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
-COOKIES_FILE = "cookies.json"
-client = Client("en-US")
-
-
-def send_telegram_log(message: str):
-    """Sadece sana özel Telegram bildirimi gönderir."""
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": message,
-                "parse_mode": "Markdown",
-            }
-            requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            print(f"Telegram log gönderme hatası: {e}")
-
-
-async def login():
-    print("🔑 X oturumu kontrol ediliyor...")
-
-    # 1. Öncelik: Render Environment X_COOKIES_JSON (Esnek Format Destekli)
-    if X_COOKIES_JSON and X_COOKIES_JSON.strip():
-        try:
-            raw_cookies = json.loads(X_COOKIES_JSON.strip())
-            if isinstance(raw_cookies, list):
-                cookies_dict = {
-                    cookie["name"]: cookie["value"]
-                    for cookie in raw_cookies
-                    if "name" in cookie and "value" in cookie
-                }
-            else:
-                cookies_dict = raw_cookies
-
-            client.set_cookies(cookies_dict)
-            print("✅ Environment 'X_COOKIES_JSON' üzerinden oturum yüklendi.")
-            return
-        except Exception as e:
-            print(f"⚠️ Environment cookies okuma hatası: {e}")
-
-    # 2. Öncelik: Yerel cookies.json dosyası
-    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
-        try:
-            with open(COOKIES_FILE, "r", encoding="utf-8") as f:
-                raw_cookies = json.load(f)
-                if isinstance(raw_cookies, list):
-                    cookies_dict = {
-                        cookie["name"]: cookie["value"]
-                        for cookie in raw_cookies
-                        if "name" in cookie and "value" in cookie
-                    }
-                else:
-                    cookies_dict = raw_cookies
-
-                client.set_cookies(cookies_dict)
-                print("✅ Yerel 'cookies.json' dosyasından oturum yüklendi.")
-                return
-        except Exception as e:
-            print(f"⚠️ Dosya cookies okuma hatası: {e}")
-
-    # 3. Öncelik: Kullanıcı bilgileriyle giriş
-    print("⚠️ Çerez bulunamadı, kullanıcı bilgileriyle giriş deneniyor...")
-    await client.login(
-        auth_info_1=X_USERNAME, auth_info_2=X_EMAIL, password=X_PASSWORD
-    )
-
-
-def generate_ai_tweet():
-    """Sabit bilgi havuzu YOKtur! %100 Yapay Zeka üretir."""
-    prompt = (
-        "Sen doğa, okyanus, canlılar dünyası ve çevre hakkında büyüleyici"
-        " bilgiler paylaşan uzman bir içerik üreticisisin. Takipçilerin ilgisini"
-        " çekecek, samimi ve merak uyandıran 1 adet Türkçe X (Twitter) gönderisi"
-        " yaz.\n\nKurallar:\n- İçerik tamamen doğa, deniz canlıları, hayvanlar"
-        " veya ekosistem ile ilgili olsun.\n- Maksimum 200 karakter olsun.\n-"
-        " En fazla 3 adet alakalı hashtag ekle (#doğa #nature gibi).\n- Kesinlikle"
-        " 'Üretici:', 'Bot:', 'Sabit Havuz' veya kaynak/dipnot etiketleri"
-        " EKLEME."
-    )
-
-    # 1. Öncelik: Gemini API (İstenen Güncel Model: gemini-3.8-flash)
-    if GEMINI_API_KEY:
-        try:
-            ai_client = genai.Client(api_key=GEMINI_API_KEY)
-            response = ai_client.models.generate_content(
-                model="gemini-3.8-flash", contents=prompt
-            )
-            if response.text:
-                return response.text.strip(), "Gemini 3.8 Flash"
-        except Exception as e:
-            print(f"⚠️ Gemini tweet üretimi başarısız, Groq deneniyor: {e}")
-
-    # 2. Öncelik (Yedek): Groq API (Garanti & Güncel Model: llama-3.1-8b-instant)
-    if GROQ_API_KEY and GROQ_AVAILABLE:
-        try:
-            groq_client = Groq(api_key=GROQ_API_KEY)
-            completion = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=150,
-            )
-            if completion.choices[0].message.content:
-                return completion.choices[0].message.content.strip(), (
-                    "Groq (Llama-3.1)"
-                )
-        except Exception as e:
-            print(f"⚠️️ Groq tweet üretimi başarısız: {e}")
-
-    raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
-
-
-async def post_daily_tweet():
-    await login()
-
-    tweet_text, ai_model = generate_ai_tweet()
-
-    # X'e atılan tweet tamamen organiktir, bot/AI izi taşımaz
-    print(f"🚀 Tweet Paylaşılıyor ({ai_model}):\n{tweet_text}")
-    await client.create_tweet(text=tweet_text)
-
-    # Telegram'a özel detaylı rapor gönderilir
-    telegram_msg = (
-        f"✅ **Yeni Doğa Tweeti Paylaşıldı!**\n\n"
-        f"📝 **İçerik:**\n{tweet_text}\n\n"
-        f"🤖 **Kullanılan AI:** `{ai_model}`"
-    )
-    send_telegram_log(telegram_msg)
-
-
-if __name__ == "__main__":
+⚠️ Hata/Uyarı Logları:
+Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+Traceback (most recent call last):
+  File "/opt/render/project/src/twitter_nature_bot.py", line 162, in <module>
     asyncio.run(post_daily_tweet())
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/opt/render/project/python/Python-3.14.3/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/opt/render/project/python/Python-3.14.3/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/render/project/python/Python-3.14.3/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/opt/render/project/src/twitter_nature_bot.py", line 146, in post_daily_tweet
+    tweet_text, ai_model = generate_ai_tweet()
+                           ~~~~~~~~~~~~~~~~~^^
+  File "/opt/render/project/src/twitter_nature_bot.py", line 140, in generate_ai_tweet
+    raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
+Exception: ❌ Hiçbir Yapay Zeka servisi içerik üretemedi!
+```
