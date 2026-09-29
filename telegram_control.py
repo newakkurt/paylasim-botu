@@ -6,12 +6,16 @@ Telegram Kontrol Paneli & Inline Buton Dinleyici - Render.com Uyumlu
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import requests
 import tweepy
+
+# Unbuffered output (Log tamponlamasını kapat)
+sys.stdout.reconfigure(line_buffering=True)
 
 # Ortam Değişkenleri
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -52,7 +56,7 @@ class HealthCheckHandler(SimpleHTTPRequestHandler):
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    print(f"🌐 HTTP Sunucusu {port} portunda başlatıldı.")
+    print(f"🌐 HTTP Sunucusu {port} portunda başlatıldı.", flush=True)
     server.serve_forever()
 
 
@@ -107,7 +111,7 @@ def send_message(text: str) -> None:
             timeout=10,
         )
     except Exception as e:
-        print("Telegram mesaj hatası:", e)
+        print("Telegram mesaj hatası:", e, flush=True)
 
 
 def answer_callback_query(callback_query_id: str, text: str) -> None:
@@ -118,7 +122,7 @@ def answer_callback_query(callback_query_id: str, text: str) -> None:
             timeout=10,
         )
     except Exception as e:
-        print("Callback yanıt hatası:", e)
+        print("Callback yanıt hatası:", e, flush=True)
 
 
 def get_updates(offset: int) -> list[dict]:
@@ -133,18 +137,32 @@ def get_updates(offset: int) -> list[dict]:
         resp.raise_for_status()
         return resp.json().get("result", [])
     except Exception as e:
-        print("Updates hatası:", e)
+        print("Updates hatası:", e, flush=True)
         return []
 
 
 def run_script(script_name: str) -> tuple[bool, str]:
+    # python -u parametresi ile çıktıların anlık yakalanması sağlanır
     result = subprocess.run(
-        ["python", script_name],
+        ["python", "-u", script_name],
         capture_output=True, text=True, timeout=600,
     )
     success = result.returncode == 0
-    output = result.stdout[-1500:] + "\n" + result.stderr[-1500:]
-    return success, output
+    
+    out = result.stdout.strip() if result.stdout else ""
+    err = result.stderr.strip() if result.stderr else ""
+    
+    combined_output = out
+    if err:
+        if combined_output:
+            combined_output += "\n\n⚠️ Hata/Uyarı Logları:\n" + err
+        else:
+            combined_output = err
+
+    if not combined_output:
+        combined_output = "Betik herhangi bir konsol çıktısı üretmedi."
+
+    return success, combined_output
 
 
 # --- Telegram Güncellemelerini İşleme ---
@@ -229,24 +247,26 @@ def process_updates(offset: int) -> int:
                 script = COMMANDS[cmd]
                 send_message(f"⏳ Komut alındı: {cmd}\nÇalıştırılıyor: {script}")
                 success, output = run_script(script)
+                
+                # Çıktı logunu Telegram'a iletme
                 if success:
-                    send_message(f"✅ Başarılı: {cmd} tamamlandı.")
+                    send_message(f"✅ **Başarılı: {cmd} tamamlandı.**\n\n📄 **Çıktı Logu:**\n```\n{output[:3500]}\n```")
                 else:
-                    send_message(f"❌ Hata oluştu ({cmd}):\n{output[:500]}")
+                    send_message(f"❌ **Hata oluştu ({cmd}):**\n\n📄 **Loglar:**\n```\n{output[:3500]}\n```")
 
     save_offset(new_offset)
     return new_offset
 
 
 def main() -> None:
-    print("🤖 Telegram Kontrol & Onay Botu Başlatıldı...")
+    print("🤖 Telegram Kontrol & Onay Botu Başlatıldı...", flush=True)
     offset = load_offset()
     
     while True:
         try:
             offset = process_updates(offset)
         except Exception as e:
-            print("Döngü hatası:", e)
+            print("Döngü hatası:", e, flush=True)
         time.sleep(2)
 
 
