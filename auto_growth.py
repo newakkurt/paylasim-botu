@@ -2,34 +2,55 @@ import asyncio
 import random
 import os
 import sys
+import json
 from twikit import Client
 from google import genai
 
-# Log tamponlamasını kapat
 sys.stdout.reconfigure(line_buffering=True)
 
-# Ortam Değişkenleri
 X_USERNAME = os.environ.get("X_USERNAME")
 X_EMAIL = os.environ.get("X_EMAIL")
 X_PASSWORD = os.environ.get("X_PASSWORD")
+X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")  # Render için opsiyonel
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Hedef Niş Hesaplar
 TARGET_ACCOUNTS = ["NatGeo", "BBCEarth", "WWF_TURKIYE", "TEMA_Vakfi", "DogaDernegi", "NOAA"]
+COOKIES_FILE = "cookies.json"
 
 client = Client('en-US')
 
 async def login():
-    print("🔑 X hesabına giriş yapılıyor...")
-    await client.login(
-        auth_info_1=X_USERNAME,
-        auth_info_2=X_EMAIL,
-        password=X_PASSWORD
-    )
-    print("✅ Giriş başarılı.")
+    print("🔑 X oturumu kontrol ediliyor...")
+    
+    # 1. Yerel cookies.json varsa yükle
+    if os.path.exists(COOKIES_FILE):
+        client.load_cookies(COOKIES_FILE)
+        print("✅ Yerel cookies.json ile oturum açıldı.")
+        return
+
+    # 2. Render Environment'tan X_COOKIES_JSON tanımlıysa kullan
+    if X_COOKIES_JSON:
+        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+            f.write(X_COOKIES_JSON)
+        client.load_cookies(COOKIES_FILE)
+        print("✅ Environment cookies dizesi ile oturum açıldı.")
+        return
+
+    # 3. Hiçbiri yoksa kullanıcı adı/şifre dene
+    try:
+        await client.login(
+            auth_info_1=X_USERNAME,
+            auth_info_2=X_EMAIL,
+            password=X_PASSWORD
+        )
+        client.save_cookies(COOKIES_FILE)
+        print("✅ Kullanıcı bilgileriyle giriş yapıldı ve cookies.json kaydedildi.")
+    except Exception as e:
+        print(f"❌ Giriş hatası: {e}")
+        raise e
+
 
 def generate_relevant_comment(tweet_text: str, author: str) -> str:
-    """Tweet içeriğine tamamen alakalı olumlu ve yapıcı yorum üretir."""
     prompt = (
         f"Sen tutkulu bir doğa ve okyanus fotoğrafçısısın. "
         f"@{author} hesabının şu paylaşımına içten, olumlu, yapıcı ve alakalı bir Türkçe yorum yaz:\n\n"
@@ -47,6 +68,7 @@ def generate_relevant_comment(tweet_text: str, author: str) -> str:
         print(f"AI yorum üretim hatası: {e}")
         return "Doğanın mükemmelliğini ve bu harika açıları görmek ilham verici! 🌿"
 
+
 async def run_bot():
     await login()
     
@@ -60,22 +82,20 @@ async def run_bot():
                 continue
 
             for tweet in tweets:
-                # 1. Alakalı Yorum Üret ve Yap
                 comment = generate_relevant_comment(tweet.text, handle)
                 print(f"💬 Yorum hazırlanıyor: {comment}")
                 
                 await tweet.reply(comment)
                 print(f"✅ Yorum gönderildi -> @{handle}")
                 
-                # 2. İnsan Gibi Davran: 15-30 Dakika Rastgele Bekle (Radara Yakalanmama)
                 sleep_minutes = random.randint(15, 30)
                 print(f"⏳ Güvenlik için {sleep_minutes} dakika bekleniyor...")
                 await asyncio.sleep(sleep_minutes * 60)
-                break # Her hesaptan sadece 1 son tweete işlem yap
+                break
                 
         except Exception as e:
-            print(f"⚠️ @{handle} işlenirken hata veya limit: {e}")
-            await asyncio.sleep(300) # Hata durumunda 5 dk bekle
+            print(f"⚠️ @{handle} işlenirken hata: {e}")
+            await asyncio.sleep(60)
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
