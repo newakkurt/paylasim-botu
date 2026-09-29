@@ -1,50 +1,69 @@
 import asyncio
-import random
-import os
-import sys
 import json
-from twikit import Client
+import os
+import random
+import sys
 from google import genai
+from twikit import Client
 
 sys.stdout.reconfigure(line_buffering=True)
 
 X_USERNAME = os.environ.get("X_USERNAME")
 X_EMAIL = os.environ.get("X_EMAIL")
 X_PASSWORD = os.environ.get("X_PASSWORD")
-X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")  # Render için opsiyonel
+X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-TARGET_ACCOUNTS = ["NatGeo", "BBCEarth", "WWF_TURKIYE", "TEMA_Vakfi", "DogaDernegi", "NOAA"]
+TARGET_ACCOUNTS = [
+    "NatGeo",
+    "BBCEarth",
+    "WWF_TURKIYE",
+    "TEMA_Vakfi",
+    "DogaDernegi",
+    "NOAA",
+]
 COOKIES_FILE = "cookies.json"
 
-client = Client('en-US')
+client = Client("en-US")
+
 
 async def login():
     print("🔑 X oturumu kontrol ediliyor...")
-    
-    # 1. Yerel cookies.json varsa yükle
-    if os.path.exists(COOKIES_FILE):
-        client.load_cookies(COOKIES_FILE)
-        print("✅ Yerel cookies.json ile oturum açıldı.")
-        return
 
-    # 2. Render Environment'tan X_COOKIES_JSON tanımlıysa kullan
-    if X_COOKIES_JSON:
-        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
-            f.write(X_COOKIES_JSON)
-        client.load_cookies(COOKIES_FILE)
-        print("✅ Environment cookies dizesi ile oturum açıldı.")
-        return
+    # 1. Öncelik: Render Environment içindeki X_COOKIES_JSON metni
+    if X_COOKIES_JSON and X_COOKIES_JSON.strip():
+        try:
+            cookies_dict = json.loads(X_COOKIES_JSON.strip())
+            client.set_cookies(cookies_dict)
+            print("✅ Environment 'X_COOKIES_JSON' üzerinden oturum yüklendi.")
+            return
+        except Exception as e:
+            print(f"⚠️ Environment cookies okuma hatası: {e}")
 
-    # 3. Hiçbiri yoksa kullanıcı adı/şifre dene
+    # 2. Öncelik: Dosya bazlı cookies.json (Boş olup olmadığını kontrol ederek)
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        try:
+            with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+                cookies_dict = json.load(f)
+                client.set_cookies(cookies_dict)
+                print("✅ Yerel 'cookies.json' dosyasından oturum yüklendi.")
+                return
+        except Exception as e:
+            print(f"⚠️️ Dosya cookies okuma hatası: {e}")
+
+    # 3. Öncelik: Klasik Giriş (Cookie yoksa veya geçersizse)
+    print("⚠️ Geçerli çerez bulunamadı, kullanıcı bilgileriyle giriş deneniyor...")
     try:
         await client.login(
-            auth_info_1=X_USERNAME,
-            auth_info_2=X_EMAIL,
-            password=X_PASSWORD
+            auth_info_1=X_USERNAME, auth_info_2=X_EMAIL, password=X_PASSWORD
         )
-        client.save_cookies(COOKIES_FILE)
-        print("✅ Kullanıcı bilgileriyle giriş yapıldı ve cookies.json kaydedildi.")
+        # Giriş başarılı olursa çerezleri dosyaya kaydet
+        cookies = client.get_cookies()
+        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+            json.dump(cookies, f)
+        print(
+            "✅ Kullanıcı bilgileriyle giriş başarılı, yeni cookies.json kaydedildi."
+        )
     except Exception as e:
         print(f"❌ Giriş hatası: {e}")
         raise e
@@ -62,7 +81,9 @@ def generate_relevant_comment(tweet_text: str, author: str) -> str:
     )
     try:
         ai_client = genai.Client(api_key=GEMINI_API_KEY)
-        resp = ai_client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        resp = ai_client.models.generate_content(
+            model="gemini-2.0-flash", contents=prompt
+        )
         return resp.text.strip()
     except Exception as e:
         print(f"AI yorum üretim hatası: {e}")
@@ -71,31 +92,34 @@ def generate_relevant_comment(tweet_text: str, author: str) -> str:
 
 async def run_bot():
     await login()
-    
+
     for handle in TARGET_ACCOUNTS:
         try:
             print(f"\n🔍 @{handle} hesabı inceleniyor...")
             user = await client.get_user_by_screen_name(handle)
-            tweets = await user.get_tweets('Tweets', count=3)
-            
+            tweets = await user.get_tweets("Tweets", count=3)
+
             if not tweets:
                 continue
 
             for tweet in tweets:
                 comment = generate_relevant_comment(tweet.text, handle)
                 print(f"💬 Yorum hazırlanıyor: {comment}")
-                
+
                 await tweet.reply(comment)
                 print(f"✅ Yorum gönderildi -> @{handle}")
-                
+
                 sleep_minutes = random.randint(15, 30)
-                print(f"⏳ Güvenlik için {sleep_minutes} dakika bekleniyor...")
+                print(
+                    f"⏳ Güvenlik için {sleep_minutes} dakika bekleniyor..."
+                )
                 await asyncio.sleep(sleep_minutes * 60)
                 break
-                
+
         except Exception as e:
             print(f"⚠️ @{handle} işlenirken hata: {e}")
             await asyncio.sleep(60)
+
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
