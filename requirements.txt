@@ -7,3 +7,9 @@ tweepy
 twikit
 google-genai
 requests
+
+
+twikit
+google-genai
+groq
+requests
