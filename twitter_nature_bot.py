@@ -16,7 +16,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 BASE_HASHTAGS = "#doğa #nature #earth"
 
-# Gemini başarısız olursa kullanılan ÜCRETSİZ yedek bilgi havuzu (hiçbir API/ücret gerektirmez)
+# Gemini/Groq başarısız olursa kullanılan ücretsiz yedek bilgi havuzu
 FALLBACK_FACTS = [
     "Bir ağaç yılda ortalama 22 kilogram karbondioksit emer ve karşılığında oksijen üretir.",
     "Amazon Ormanları dünyadaki oksijenin yaklaşık %20'sini üretir, bu yüzden 'dünyanın akciğerleri' olarak anılır.",
@@ -73,6 +73,17 @@ WEEKDAY_CONCEPTS = {
     6: ("Biyoçeşitlilik ve Ekosistemler", "#NatureSunday", ["nature", "rainforest", "landscape"]),
 }
 
+ENGAGEMENT_QUESTIONS = [
+    "Siz hayatınızda gördüğünüz en yaşlı ağacı hatırlıyor musunuz? 🌳",
+    "Bu bilgiyi daha önce biliyor muydunuz? 🤔",
+    "Sizce doğanın en şaşırtıcı sırrı hangisi? 🌿",
+    "Bugüne kadar gördüğünüz en etkileyici doğa manzarası neresiydi? 🏞️",
+    "Bu türü daha önce hiç görme şansınız oldu mu? 👀",
+    "Doğada en çok hangi canlıyı gözlemlemeyi seversiniz? 🦋",
+    "Bu bilgi sizi de benim kadar şaşırttı mı? ✨",
+    "Sizce ormanların en kıymetli hazinesi ne olabilir? 🌲",
+]
+
 
 def get_seasonal_keywords() -> list[str]:
     month = datetime.now().month
@@ -107,8 +118,8 @@ def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
     return prompt_instruction, full_hashtags, concept_keywords
 
 
-def generate_with_groq(prompt: str) -> str:
-    """Groq API ile dener (tamamen ücretsiz katman, kredi kartı gerektirmez)."""
+def generate_with_groq(prompt: str) -> tuple[str, str]:
+    """Groq API ile metin üretir."""
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY tanımlanmamış.")
 
@@ -123,25 +134,13 @@ def generate_with_groq(prompt: str) -> str:
         timeout=20,
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+    text = resp.json()["choices"][0]["message"]["content"].strip()
+    return text, "Groq (Llama-3.3-70b)"
 
 
-ENGAGEMENT_QUESTIONS = [
-    "Siz hayatınızda gördüğünüz en yaşlı ağacı hatırlıyor musunuz? 🌳",
-    "Bu bilgiyi daha önce biliyor muydunuz? 🤔",
-    "Sizce doğanın en şaşırtıcı sırrı hangisi? 🌿",
-    "Bugüne kadar gördüğünüz en etkileyici doğa manzarası neresiydi? 🏞️",
-    "Bu türü daha önce hiç görme şansınız oldu mu? 👀",
-    "Doğada en çok hangi canlıyı gözlemlemeyi seversiniz? 🦋",
-    "Bu bilgi sizi de benim kadar şaşırttı mı? ✨",
-    "Sizce ormanların en kıymetli hazinesi ne olabilir? 🌲",
-]
-
-
-def generate_nature_fact(prompt_instruction: str) -> str:
-    """1. Gemini (ücretsiz), 2. Groq (ücretsiz), 3. sabit bilgi havuzu (ücretsiz)
-    sırasıyla dener. Sadece BİLGİ metnini döndürür, soru artık ayrı bir yorum
-    (reply) olarak paylaşılıyor."""
+def generate_nature_fact(prompt_instruction: str) -> tuple[str, str]:
+    """1. Gemini, 2. Groq, 3. Sabit bilgi havuzunu dener.
+    Dönen değerler: (Bilgi Metni, Yapay Zeka Model İsmi)"""
     prompt = (
         f"{prompt_instruction}\n"
         "Direkt metinle başla. Giriş/çıkış açıklaması yapma, tırnak işareti veya "
@@ -156,19 +155,19 @@ def generate_nature_fact(prompt_instruction: str) -> str:
             try:
                 print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
                 response = client.models.generate_content(model=model_name, contents=prompt)
-                return response.text.strip()
+                return response.text.strip(), f"Google Gemini ({model_name})"
             except Exception as e:
                 print(f"Gemini API uyarısı ({model_name}): {e}")
                 time.sleep(5)
 
-    print("⚠️ Gemini yanıt veremedi. Groq API'ye geçiliyor (ücretsiz)...")
+    print("⚠️ Gemini yanıt veremedi. Groq API'ye geçiliyor...")
     try:
         return generate_with_groq(prompt)
     except Exception as e:
         print(f"Groq API uyarısı: {e}")
 
     print("⚠️ Groq da yanıt veremedi. Ücretsiz sabit bilgi havuzuna düşülüyor...")
-    return random.choice(FALLBACK_FACTS)
+    return random.choice(FALLBACK_FACTS), "Sabit Bilgi Havuzu"
 
 
 def fetch_unsplash_photo(query_str: str) -> dict:
@@ -204,11 +203,15 @@ def get_unsplash_image_url(concept_keywords: list[str]) -> str:
     raise RuntimeError("Unsplash API hiçbir arama sorgusuna görsel döndüremedi.")
 
 
-def send_telegram_notification(text: str, image_url: str) -> None:
+def send_telegram_notification(text: str, image_url: str, ai_model: str) -> None:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    caption = f"✅ **Yeni Paylaşım Yapıldı!**\n\n{text}"
+    caption = (
+        f"✅ **Yeni Paylaşım Yapıldı!**\n\n"
+        f"{text}\n\n"
+        f"🤖 **Üretici AI:** `{ai_model}`"
+    )
     try:
         requests.post(
             telegram_url,
@@ -282,10 +285,6 @@ def get_channel_ids(organization_id: str) -> dict[str, str]:
 
 
 def create_post(channel_id: str, text: str, image_url: str, reply_text: str | None = None) -> None:
-    """Post oluşturur. reply_text verilirse (ve servis X ise) soru, ana
-    paylaşımın altına ayrı bir yorum (thread) olarak eklenir. Buffer, thread
-    kullanılırken görseli üst seviyede değil, thread'in ilk elemanının içinde
-    bekliyor - bu yüzden reply_text varsa assets oraya taşınıyor."""
     if reply_text:
         input_data = {
             "text": text,
@@ -331,14 +330,45 @@ def create_post(channel_id: str, text: str, image_url: str, reply_text: str | No
     print("Paylaşıldı:", result["post"])
 
 
+def generate_reply_for_tweet(tweet_text: str, author_handle: str) -> tuple[str, str]:
+    """Başka bir Twitter hesabının paylaşımına mantıklı ve olumlu AI yorumu üretir."""
+    prompt = (
+        f"Aşağıdaki Twitter paylaşımına uygun, olumlu, merak uyandırıcı ve doğal bir yorum yaz.\n"
+        f"Hesap: @{author_handle}\n"
+        f"Tweet: '{tweet_text}'\n"
+        f"Sadece yazılacak yorum metnini döndür. Maksimum 180 karakter olsun."
+    )
+    
+    if GEMINI_API_KEY:
+        try:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return res.text.strip(), "Google Gemini (gemini-2.0-flash)"
+        except Exception as e:
+            print("Gemini yorum üretme hatası:", e)
+
+    try:
+        reply_text, ai_model = generate_with_groq(prompt)
+        return reply_text, ai_model
+    except Exception as e:
+        print("Groq yorum üretme hatası:", e)
+        
+    return "Harika bir içerik ve bilgilendirme! Doğa gerçekten her gün şaşırtmaya devam ediyor. 🌿", "Sabit Yanıt Havuzu"
+
+
 def main() -> None:
     try:
         org_id = get_organization_id()
         channels = get_channel_ids(org_id)
 
         prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
-        fact = generate_nature_fact(prompt_instruction)
-        text = fact + "\n\n" + hashtags
+        
+        # Yapay zekadan bilgi ve hangi AI modelinin ürettiği bilgisini çekiyoruz
+        fact, ai_model = generate_nature_fact(prompt_instruction)
+        
+        # Paylaşılacak metin ve yapay zeka imzamız
+        text = f"{fact}\n\n{hashtags}\n\n🤖 Üretici: {ai_model}"
+        
         question = random.choice(ENGAGEMENT_QUESTIONS)
         image_url = get_unsplash_image_url(concept_keywords)
 
@@ -352,7 +382,7 @@ def main() -> None:
         else:
             print("Uyarı: Buffer'a bağlı bir Instagram kanalı bulunamadı, atlanıyor.")
 
-        send_telegram_notification(text, image_url)
+        send_telegram_notification(text, image_url, ai_model)
 
     except Exception as e:
         error_msg = str(e)
