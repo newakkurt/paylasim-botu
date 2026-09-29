@@ -5,7 +5,7 @@ import sys
 import requests
 from google import genai
 
-# Groq kütüphanesi yüklü değilse çökmesini engeller
+# Groq kütüphanesi yüklü değilse botun çökmesini engeller
 try:
     from groq import Groq
 
@@ -99,43 +99,44 @@ async def login():
 def generate_ai_tweet():
     """Sabit bilgi havuzu YOKtur! %100 Yapay Zeka üretir."""
     prompt = (
-        "Sen doğa, okyanus, canlılar dünyası ve çevre hakkında büyüleyici bilgiler paylaşan uzman bir içerik üreticisisin. "
-        "Takipçilerin ilgisini çekecek, samimi ve merak uyandıran 1 adet Türkçe X (Twitter) gönderisi yaz.\n\n"
-        "Kurallar:\n"
-        "- İçerik tamamen doğa, deniz canlıları, hayvanlar veya ekosistem ile ilgili olsun.\n"
-        "- Maksimum 200 karakter olsun.\n"
-        "- En fazla 3 adet alakalı hashtag ekle (#doğa #nature gibi).\n"
-        "- Kesinlikle 'Üretici:', 'Bot:', 'Sabit Havuz' veya kaynak/dipnot etiketleri EKLEME."
+        "Sen doğa, okyanus, canlılar dünyası ve çevre hakkında büyüleyici"
+        " bilgiler paylaşan uzman bir içerik üreticisisin. Takipçilerin ilgisini"
+        " çekecek, samimi ve merak uyandıran 1 adet Türkçe X (Twitter) gönderisi"
+        " yaz.\n\nKurallar:\n- İçerik tamamen doğa, deniz canlıları, hayvanlar"
+        " veya ekosistem ile ilgili olsun.\n- Maksimum 200 karakter olsun.\n-"
+        " En fazla 3 adet alakalı hashtag ekle (#doğa #nature gibi).\n- Kesinlikle"
+        " 'Üretici:', 'Bot:', 'Sabit Havuz' veya kaynak/dipnot etiketleri"
+        " EKLEME."
     )
 
-    # 1. Öncelik: Gemini API
+    # 1. Öncelik: Gemini API (İstenen Güncel Model: gemini-3.8-flash)
     if GEMINI_API_KEY:
         try:
             ai_client = genai.Client(api_key=GEMINI_API_KEY)
             response = ai_client.models.generate_content(
-                model="gemini-2.0-flash", contents=prompt
+                model="gemini-3.8-flash", contents=prompt
             )
             if response.text:
-                return response.text.strip(), "Gemini 2.0 Flash"
+                return response.text.strip(), "Gemini 3.8 Flash"
         except Exception as e:
-            print(f"⚠️️ Gemini tweet üretimi başarısız, Groq deneniyor: {e}")
+            print(f"⚠️ Gemini tweet üretimi başarısız, Groq deneniyor: {e}")
 
-    # 2. Öncelik (Yedek): Groq API
+    # 2. Öncelik (Yedek): Groq API (Garanti & Güncel Model: llama-3.1-8b-instant)
     if GROQ_API_KEY and GROQ_AVAILABLE:
         try:
             groq_client = Groq(api_key=GROQ_API_KEY)
             completion = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=150,
             )
             if completion.choices[0].message.content:
                 return completion.choices[0].message.content.strip(), (
-                    "Groq (Llama-3.3)"
+                    "Groq (Llama-3.1)"
                 )
         except Exception as e:
-            print(f"⚠️ Groq tweet üretimi başarısız: {e}")
+            print(f"⚠️️ Groq tweet üretimi başarısız: {e}")
 
     raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
 
