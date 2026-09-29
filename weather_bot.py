@@ -59,7 +59,7 @@ def get_istanbul_weather() -> dict:
     return resp.json()
 
 
-def format_weather_text(data: dict) -> str:
+def format_weather_text(data: dict, greeting: bool = False) -> str:
     current = data["current"]
     daily = data["daily"]
 
@@ -73,8 +73,10 @@ def format_weather_text(data: dict) -> str:
     temp_max = round(daily["temperature_2m_max"][0])
     temp_min = round(daily["temperature_2m_min"][0])
 
+    header = f"Günaydın! {emoji}\n\nİstanbul Hava Durumu\n\n" if greeting else f"{emoji} İstanbul Hava Durumu\n\n"
+
     text = (
-        f"{emoji} İstanbul Hava Durumu\n\n"
+        f"{header}"
         f"Şu an: {temp}°C (hissedilen {feels_like}°C)\n"
         f"Durum: {condition}\n"
         f"Bugün: {temp_min}°C - {temp_max}°C\n"
@@ -176,8 +178,11 @@ def create_post(channel_id: str, text: str, image_url: str) -> None:
 
 
 def main() -> None:
+    import sys
+    greeting = len(sys.argv) > 1 and sys.argv[1] == "morning"
+
     weather_data = get_istanbul_weather()
-    text = format_weather_text(weather_data)
+    text = format_weather_text(weather_data, greeting=greeting)
     image_query = pick_image_query(weather_data["current"]["weather_code"])
     image_url = get_unsplash_image_url(image_query)
 
