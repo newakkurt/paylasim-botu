@@ -40,7 +40,7 @@ FALLBACK_FACTS = [
     "Denizanaları 500 milyon yıldan uzun süredir var olan, dinozorlardan bile daha eski canlılardır.",
     "Bir tek balina, yaşamı boyunca karbondioksit tutma açısından binlerce ağaca bedel olabilir.",
     "Panda ayıları günde 12 saate kadar sadece bambu yiyerek geçirebilir.",
-    "Mercan resifleri, okyanus tabanının yalnızca küçük bir kısmını kaplamasına rağmen deniz canlılarının çeyreğine ev sahipliği yapabilir.",
+    "Mercan resifleri, okyanus tabanının yalnızca küçük bir kısmını kaplamasına rağmen deniz canlılarının çeyreğine ev sahipliği yapar.",
     "Bir çita, saatte 110 kilometreye kadar hız yapabilir ama bu hızı yalnızca birkaç saniye sürdürebilir.",
     "Bir semender, kopan bir uzvunu yeniden büyütebilir.",
     "Deniz kaplumbağaları, doğdukları plaja yıllar sonra yumurtlamak için geri dönebilir.",
@@ -283,29 +283,31 @@ def get_channel_ids(organization_id: str) -> dict[str, str]:
 
 def create_post(channel_id: str, text: str, image_url: str, reply_text: str | None = None) -> None:
     """Post oluşturur. reply_text verilirse (ve servis X ise) soru, ana
-    paylaşımın altına ayrı bir yorum (thread) olarak eklenir."""
-    
-    # URL sonuna &fm=jpg ekleyerek Buffer'ın bunu geçerli görsel sanmasını sağlıyoruz
-    if "?" in image_url:
-        image_url = f"{image_url}&fm=jpg" if "fm=jpg" not in image_url else image_url
-    else:
-        image_url = f"{image_url}?fm=jpg"
-
-    input_data = {
-        "text": text,
-        "channelId": channel_id,
-        "schedulingType": "automatic",
-        "mode": "shareNow",
-        "assets": [{"image": {"url": image_url}}],
-    }
+    paylaşımın altına ayrı bir yorum (thread) olarak eklenir. Buffer, thread
+    kullanılırken görseli üst seviyede değil, thread'in ilk elemanının içinde
+    bekliyor - bu yüzden reply_text varsa assets oraya taşınıyor."""
     if reply_text:
-        input_data["metadata"] = {
-            "twitter": {
-                "thread": [
-                    {"text": text},
-                    {"text": reply_text},
-                ]
-            }
+        input_data = {
+            "text": text,
+            "channelId": channel_id,
+            "schedulingType": "automatic",
+            "mode": "shareNow",
+            "metadata": {
+                "twitter": {
+                    "thread": [
+                        {"text": text, "assets": [{"image": {"url": image_url}}]},
+                        {"text": reply_text},
+                    ]
+                }
+            },
+        }
+    else:
+        input_data = {
+            "text": text,
+            "channelId": channel_id,
+            "schedulingType": "automatic",
+            "mode": "shareNow",
+            "assets": [{"image": {"url": image_url}}],
         }
 
     data = buffer_graphql(

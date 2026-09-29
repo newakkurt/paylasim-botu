@@ -23,6 +23,27 @@ BUFFER_API_URL = "https://api.buffer.com"
 BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
 PEXELS_API_KEY = os.environ["PEXELS_API_KEY"]
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+
+def configure_git_remote() -> bool:
+    """Git remote'u bir Personal Access Token ile kimlik doğrulamalı hale
+    getirir. Render gibi ortamlarda (GitHub Actions dışında) push işleminin
+    çalışabilmesi için GITHUB_TOKEN ve GITHUB_REPOSITORY env değişkenleri
+    gerekir. İkisi de yoksa git push atlanır (kritik değil, sadece durum/video
+    kalıcı olarak paylaşılamaz)."""
+    if not GITHUB_TOKEN or not GITHUB_REPOSITORY:
+        print("GITHUB_TOKEN veya GITHUB_REPOSITORY tanımlı değil, git push atlanıyor.")
+        return False
+    remote_url = f"https://x-access-token:{GITHUB_TOKEN}@github.com/{GITHUB_REPOSITORY}.git"
+    try:
+        subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "nature-video-bot"], check=True)
+        subprocess.run(["git", "config", "user.email", "bot@users.noreply.github.com"], check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print("Git remote yapılandırılamadı:", e)
+        return False
 
 STATE_FILE = "state/used_videos.json"
 SEARCH_TERMS = ["forest", "ormanlar", "nature", "wildlife", "ocean waves", "mountains", "rainforest", "waterfall"]
@@ -56,11 +77,12 @@ def save_used_ids(ids: list[int]) -> None:
 
 
 def commit_state() -> None:
+    if not configure_git_remote():
+        return
     try:
-        subprocess.run(["git", "config", "user.name", "nature-video-bot"], check=True)
-        subprocess.run(["git", "config", "user.email", "bot@users.noreply.github.com"], check=True)
         subprocess.run(["git", "add", STATE_FILE], check=True)
         subprocess.run(["git", "commit", "-m", "Video döngüsü durumu güncellendi", "--allow-empty"], check=True)
+        subprocess.run(["git", "push"], check=True)
     except subprocess.CalledProcessError as e:
         print("Durum commit edilemedi (kritik değil):", e)
 
@@ -155,7 +177,15 @@ def commit_video_and_get_url(video_path: str) -> str:
     dest_path = os.path.join(dest_dir, "latest_nature_video.mp4")
     subprocess.run(["cp", video_path, dest_path], check=True)
 
-    subprocess.run(["git", "config", "user.name", "nature-video-bot"], check=True)
+    if not configure_git_remote():
+        raise RuntimeError(
+            "Video herkese açık bir linke taşınamadı: GITHUB_TOKEN/GITHUB_REPOSITORY "
+            "tanımlı değil. Render'da Environment sekmesine bu ikisini eklemen gerekiyor."
+        )
+
+    subprocess.run(["git", "add", dest_path], check=True)
+    subprocess.run(["git", "commit", "-m", "Yeni doğa videosu", "--allow-empty"], check=True)
+    subprocess.run(["git", "push"], check=True)
 
     return f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{dest_path}"
 
