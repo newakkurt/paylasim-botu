@@ -5,6 +5,7 @@ import sys
 import requests
 from google import genai
 
+# Groq kütüphanesi yüklü değilse çökmesini engeller
 try:
     from groq import Groq
 
@@ -14,6 +15,7 @@ except ImportError:
 
 from twikit import Client
 
+# Logların Telegram'a anında düşmesi için önbellek boşaltma
 sys.stdout.reconfigure(line_buffering=True)
 
 # Environment Değişkenleri
@@ -31,6 +33,7 @@ client = Client("en-US")
 
 
 def send_telegram_log(message: str):
+    """Sadece sana özel Telegram bildirimi gönderir."""
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -41,11 +44,13 @@ def send_telegram_log(message: str):
             }
             requests.post(url, json=payload, timeout=10)
         except Exception as e:
-            print(f"Telegram log hatası: {e}")
+            print(f"Telegram log gönderme hatası: {e}")
 
 
 async def login():
     print("🔑 X oturumu kontrol ediliyor...")
+
+    # 1. Öncelik: Render Environment X_COOKIES_JSON (Esnek Format Destekli)
     if X_COOKIES_JSON and X_COOKIES_JSON.strip():
         try:
             raw_cookies = json.loads(X_COOKIES_JSON.strip())
@@ -64,6 +69,7 @@ async def login():
         except Exception as e:
             print(f"⚠️ Environment cookies okuma hatası: {e}")
 
+    # 2. Öncelik: Yerel cookies.json dosyası
     if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         try:
             with open(COOKIES_FILE, "r", encoding="utf-8") as f:
@@ -83,6 +89,7 @@ async def login():
         except Exception as e:
             print(f"⚠️ Dosya cookies okuma hatası: {e}")
 
+    # 3. Öncelik: Kullanıcı bilgileriyle giriş
     print("⚠️ Çerez bulunamadı, kullanıcı bilgileriyle giriş deneniyor...")
     await client.login(
         auth_info_1=X_USERNAME, auth_info_2=X_EMAIL, password=X_PASSWORD
@@ -90,6 +97,7 @@ async def login():
 
 
 def generate_ai_tweet():
+    """Sabit bilgi havuzu YOKtur! %100 Yapay Zeka üretir."""
     prompt = (
         "Sen doğa, okyanus, canlılar dünyası ve çevre hakkında büyüleyici bilgiler paylaşan uzman bir içerik üreticisisin. "
         "Takipçilerin ilgisini çekecek, samimi ve merak uyandıran 1 adet Türkçe X (Twitter) gönderisi yaz.\n\n"
@@ -100,6 +108,7 @@ def generate_ai_tweet():
         "- Kesinlikle 'Üretici:', 'Bot:', 'Sabit Havuz' veya kaynak/dipnot etiketleri EKLEME."
     )
 
+    # 1. Öncelik: Gemini API
     if GEMINI_API_KEY:
         try:
             ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -109,8 +118,9 @@ def generate_ai_tweet():
             if response.text:
                 return response.text.strip(), "Gemini 2.0 Flash"
         except Exception as e:
-            print(f"⚠️ Gemini tweet üretimi başarısız, Groq deneniyor: {e}")
+            print(f"⚠️️ Gemini tweet üretimi başarısız, Groq deneniyor: {e}")
 
+    # 2. Öncelik (Yedek): Groq API
     if GROQ_API_KEY and GROQ_AVAILABLE:
         try:
             groq_client = Groq(api_key=GROQ_API_KEY)
@@ -125,7 +135,7 @@ def generate_ai_tweet():
                     "Groq (Llama-3.3)"
                 )
         except Exception as e:
-            print(f"⚠️️ Groq tweet üretimi başarısız: {e}")
+            print(f"⚠️ Groq tweet üretimi başarısız: {e}")
 
     raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
 
@@ -135,9 +145,11 @@ async def post_daily_tweet():
 
     tweet_text, ai_model = generate_ai_tweet()
 
+    # X'e atılan tweet tamamen organiktir, bot/AI izi taşımaz
     print(f"🚀 Tweet Paylaşılıyor ({ai_model}):\n{tweet_text}")
     await client.create_tweet(text=tweet_text)
 
+    # Telegram'a özel detaylı rapor gönderilir
     telegram_msg = (
         f"✅ **Yeni Doğa Tweeti Paylaşıldı!**\n\n"
         f"📝 **İçerik:**\n{tweet_text}\n\n"
