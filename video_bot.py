@@ -31,9 +31,9 @@ def fetch_pexels_video(query: str) -> str | None:
         selected_video = random.choice(videos)
         video_files = selected_video.get("video_files", [])
 
-        # Uygun HD/SD videoyu seç
+        # Telegram için en uygun çözünürlükteki SD/HD videoyu seç
         for vf in video_files:
-            if vf.get("quality") == "hd" or vf.get("quality") == "sd":
+            if vf.get("quality") == "sd" or (vf.get("width") and vf.get("width") <= 1280):
                 return vf.get("link")
 
         return video_files[0].get("link") if video_files else None
@@ -43,27 +43,48 @@ def fetch_pexels_video(query: str) -> str | None:
         return None
 
 
-def send_telegram_video(video_url: str, caption: str) -> bool:
+def download_and_send_telegram_video(video_url: str, caption: str) -> bool:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram kimlik bilgileri eksik.")
         return False
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "video": video_url,
-        "caption": caption,
-        "parse_mode": "Markdown",
-    }
-
+    temp_filename = "temp_video.mp4"
+    
     try:
-        resp = requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-        print("Video başarıyla Telegram'a gönderildi!")
+        # 1. Videoyu geçici dosya olarak indir
+        print("📥 Video indiriliyor...")
+        with requests.get(video_url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            with open(temp_filename, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+        # 2. Telegram'a dosya yükleme (Multipart Form-Data) olarak gönder
+        print("📤 Telegram'a dosya olarak yükleniyor...")
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
+        
+        with open(temp_filename, "rb") as video_file:
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "caption": caption,
+                "parse_mode": "Markdown",
+            }
+            files = {"video": video_file}
+            
+            resp = requests.post(url, data=payload, files=files, timeout=60)
+            resp.raise_for_status()
+            
+        print("✅ Video başarıyla Telegram'a gönderildi!")
         return True
+
     except Exception as e:
-        print(f"Telegram video gönderme hatası: {e}")
+        print(f"Telegram video yükleme hatası: {e}")
         return False
+
+    finally:
+        # 3. İşlem bitince geçici dosyayı temizle
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
 
 
 def main() -> None:
@@ -74,7 +95,6 @@ def main() -> None:
     video_url = fetch_pexels_video(query)
 
     if not video_url:
-        # Yedek terim dene
         query = "nature"
         video_url = fetch_pexels_video(query)
 
@@ -83,7 +103,7 @@ def main() -> None:
 
     caption = f"🌿 **Günün Doğa Videosu**\n\n🔍 *Arama Teması:* #{query}\n🎥 *Kaynak:* Pexels"
     
-    success = send_telegram_video(video_url, caption)
+    success = download_and_send_telegram_video(video_url, caption)
     if not success:
         raise RuntimeError("Video Telegram'a iletilemedi.")
 
