@@ -59,7 +59,6 @@ def save_seen_tweet(tweet_id: str) -> None:
 
 
 def generate_ai_comment(tweet_text: str, author_handle: str) -> tuple[str, str]:
-    """Tweet içeriğine uygun olumlu ve mantıklı yorum üretir."""
     prompt = (
         f"Aşağıdaki Twitter paylaşımına uygun, doğa sever, nazik, olumlu ve etkileşimi artırıcı bir yanıt/yorum yaz.\n"
         f"Paylaşan Hesap: @{author_handle}\n"
@@ -98,7 +97,6 @@ def generate_ai_comment(tweet_text: str, author_handle: str) -> tuple[str, str]:
 
 
 def send_telegram_approval_request(tweet_id: str, author_handle: str, tweet_text: str, ai_comment: str, ai_model: str) -> None:
-    """Telegram'a Inline Butonlu Onay Mesajı Gönderir."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
@@ -112,7 +110,6 @@ def send_telegram_approval_request(tweet_id: str, author_handle: str, tweet_text
         f"⚡ **Üretici AI:** `{ai_model}`"
     )
 
-    # Telegram Inline Keyboard (Onay / Kendi Yazma / İptal Butonları)
     reply_markup = {
         "inline_keyboard": [
             [
@@ -125,7 +122,6 @@ def send_telegram_approval_request(tweet_id: str, author_handle: str, tweet_text
         ]
     }
 
-    # Bekleyen yorum bilgisini geçici olarak saklayabiliriz
     os.makedirs("state/pending_replies", exist_ok=True)
     with open(f"state/pending_replies/{tweet_id}.json", "w", encoding="utf-8") as f:
         json.dump({"ai_comment": ai_comment, "author": author_handle, "text": tweet_text}, f)
@@ -147,8 +143,8 @@ def send_telegram_approval_request(tweet_id: str, author_handle: str, tweet_text
 
 
 def check_target_accounts() -> None:
-    """Hedef hesapların son tweet'lerini kontrol eder."""
-    if not ALL([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
+    # 'ALL' yerine küçük harf 'all' kullanıldı
+    if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
         print("Twitter API anahtarları tanımlı değil, izleme atlanıyor.")
         return
 
@@ -171,19 +167,14 @@ def check_target_accounts() -> None:
             for tweet in tweets.data:
                 tweet_id = str(tweet.id)
                 if tweet_id in seen_tweets:
-                    continue  # Daha önce işlendi
+                    continue
 
                 print(f"🎯 Yeni tweet bulundu (@{handle}): {tweet.text[:50]}...")
                 
-                # Yorum üret
                 ai_comment, ai_model = generate_ai_comment(tweet.text, handle)
-                
-                # Telegram'a onay talebi at
                 send_telegram_approval_request(tweet_id, handle, tweet.text, ai_comment, ai_model)
-                
-                # İşlendi olarak kaydet
                 save_seen_tweet(tweet_id)
-                break  # Her taramada hesap başına en fazla 1 yeni tweet al
+                break
 
         except Exception as e:
             print(f"@{handle} hesabı kontrol edilirken hata: {e}")
