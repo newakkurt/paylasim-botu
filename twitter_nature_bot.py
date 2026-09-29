@@ -1,3 +1,7 @@
+import sys
+
+sys.stdout.reconfigure(line_buffering=True)
+
 async def login():
     print("🔑 X oturumu kontrol ediliyor...")
 
