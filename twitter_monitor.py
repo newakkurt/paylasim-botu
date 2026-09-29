@@ -13,7 +13,7 @@ TWITTER_API_KEY = os.environ.get("TWITTER_API_KEY")
 TWITTER_API_SECRET = os.environ.get("TWITTER_API_SECRET")
 TWITTER_ACCESS_TOKEN = os.environ.get("TWITTER_ACCESS_TOKEN")
 TWITTER_ACCESS_SECRET = os.environ.get("TWITTER_ACCESS_SECRET")
-TWITTER_BEARER_TOKEN = os.environ.get("TWITTER_BEARER_TOKEN") # İsteğe bağlı / Ekstra güçlendirme
+TWITTER_BEARER_TOKEN = os.environ.get("TWITTER_BEARER_TOKEN")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
@@ -23,7 +23,6 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 SEEN_TWEETS_FILE = "state/seen_tweets.json"
 
-# Takip Edilecek Hedef Hesaplar
 TARGET_ACCOUNTS = [
     "NatGeo",
     "BBCEarth",
@@ -37,8 +36,17 @@ TARGET_ACCOUNTS = [
 
 
 def get_twitter_client() -> tweepy.Client:
+    # Bearer Token varsa v2 okuma istekleri için öncelikle o kullanılır
+    if TWITTER_BEARER_TOKEN:
+        return tweepy.Client(
+            bearer_token=TWITTER_BEARER_TOKEN,
+            consumer_key=TWITTER_API_KEY,
+            consumer_secret=TWITTER_API_SECRET,
+            access_token=TWITTER_ACCESS_TOKEN,
+            access_token_secret=TWITTER_ACCESS_SECRET,
+            wait_on_rate_limit=True
+        )
     return tweepy.Client(
-        bearer_token=TWITTER_BEARER_TOKEN if TWITTER_BEARER_TOKEN else None,
         consumer_key=TWITTER_API_KEY,
         consumer_secret=TWITTER_API_SECRET,
         access_token=TWITTER_ACCESS_TOKEN,
@@ -150,7 +158,7 @@ def send_telegram_approval_request(tweet_id: str, author_handle: str, tweet_text
 
 
 def check_target_accounts() -> None:
-    if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
+    if not TWITTER_BEARER_TOKEN and not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
         print("Twitter API anahtarları tanımlı değil, izleme atlanıyor.")
         return
 
@@ -162,7 +170,7 @@ def check_target_accounts() -> None:
             print(f"🔍 Kontrol edilirken: @{handle}")
             user = client.get_user(username=handle)
             if not user or not user.data:
-                print(f"⚠️ Kullanıcı bulunamadı: @{handle}")
+                print(f"⚠️️ Kullanıcı bulunamadı: @{handle}")
                 continue
 
             user_id = user.data.id
@@ -185,7 +193,7 @@ def check_target_accounts() -> None:
                 break
 
         except tweepy.errors.Unauthorized as e:
-            print(f"❌ @{handle} hesabı kontrol edilirken 401 Unauthorized Hatası: API Anahtarlarını ve App İzinlerini Kontrol Edin.")
+            print(f"❌ @{handle} hesabı kontrol edilirken 401 Unauthorized Hatası: Lütfen Render'a TWITTER_BEARER_TOKEN ekleyin.")
             break
         except Exception as e:
             print(f"@{handle} hesabı kontrol edilirken hata: {e}")
