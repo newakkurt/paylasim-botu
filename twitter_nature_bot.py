@@ -51,7 +51,7 @@ def send_telegram_log(message: str):
 async def login():
     print("🔑 X oturumu kontrol ediliyor...")
 
-    # 1. Öncelik: Render Environment X_COOKIES_JSON
+    # 1. Öncelik: Render Environment X_COOKIES_JSON (Esnek Format Destekli)
     if X_COOKIES_JSON and X_COOKIES_JSON.strip():
         try:
             raw_cookies = json.loads(X_COOKIES_JSON.strip())
@@ -109,9 +109,9 @@ def generate_ai_tweet():
         " EKLEME."
     )
 
-    # 1. Öncelik: Gemini API (3 Defa Yeniden Deneme Mantığı ile)
+    # 1. Öncelik: Gemini API (3 Defa Deneme / Retry Mantığı)
     if GEMINI_API_KEY:
-        for attempt in range(3):
+        for attempt in range(1, 4):
             try:
                 ai_client = genai.Client(api_key=GEMINI_API_KEY)
                 response = ai_client.models.generate_content(
@@ -120,26 +120,27 @@ def generate_ai_tweet():
                 if response.text:
                     return response.text.strip(), "Gemini 3.8 Flash"
             except Exception as e:
-                print(f"⚠️ Gemini deneme {attempt+1} başarısız: {e}")
+                print(
+                    f"⚠️ Gemini deneme {attempt}/3 başarısız ({e}), bekleniyor..."
+                )
                 time.sleep(2)
 
-    # 2. Öncelik (Yedek): Groq API (Aktif Llama 3.3 Modeli)
+    # 2. Öncelik (Yedek): Groq API (Sorunsuz Llama3 Modeli)
     if GROQ_API_KEY and GROQ_AVAILABLE:
-        for model_name in ["llama-3.3-70b-versatile", "llama3-8b-8192"]:
-            try:
-                groq_client = Groq(api_key=GROQ_API_KEY)
-                completion = groq_client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7,
-                    max_tokens=150,
+        try:
+            groq_client = Groq(api_key=GROQ_API_KEY)
+            completion = groq_client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=150,
+            )
+            if completion.choices[0].message.content:
+                return completion.choices[0].message.content.strip(), (
+                    "Groq (Llama3-8b)"
                 )
-                if completion.choices[0].message.content:
-                    return completion.choices[0].message.content.strip(), (
-                        f"Groq ({model_name})"
-                    )
-            except Exception as e:
-                print(f"⚠️ Groq ({model_name}) başarısız: {e}")
+        except Exception as e:
+            print(f"⚠️ Groq tweet üretimi başarısız: {e}")
 
     raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
 
