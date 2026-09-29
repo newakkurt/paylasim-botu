@@ -1,395 +1,135 @@
+import asyncio
+import json
 import os
 import random
-import time
+import sys
 import requests
-from datetime import datetime
 from google import genai
+from groq import Groq
+from twikit import Client
 
-BUFFER_API_URL = "https://api.buffer.com"
-BUFFER_API_KEY = os.environ["BUFFER_API_KEY"]
-UNSPLASH_ACCESS_KEY = os.environ["UNSPLASH_ACCESS_KEY"]
+sys.stdout.reconfigure(line_buffering=True)
+
+# Environment Değişkenleri
+X_USERNAME = os.environ.get("X_USERNAME")
+X_EMAIL = os.environ.get("X_EMAIL")
+X_PASSWORD = os.environ.get("X_PASSWORD")
+X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-BASE_HASHTAGS = "#doğa #nature #earth"
-
-# Gemini/Groq başarısız olursa kullanılan ücretsiz yedek bilgi havuzu
-FALLBACK_FACTS = [
-    "Bir ağaç yılda ortalama 22 kilogram karbondioksit emer ve karşılığında oksijen üretir.",
-    "Amazon Ormanları dünyadaki oksijenin yaklaşık %20'sini üretir, bu yüzden 'dünyanın akciğerleri' olarak anılır.",
-    "Mantarlar, yer altında dev bir ağ oluşturarak ağaçların birbiriyle besin ve bilgi alışverişi yapmasını sağlar.",
-    "Sekoya ağaçları 100 metreyi aşan boylara ulaşabilir ve 3000 yıldan fazla yaşayabilir.",
-    "Bir meşe ağacı, yaşamı boyunca yaklaşık 10 milyon adet meşe palamudu üretebilir.",
-    "Orman toprağının sadece bir avucunda, dünya nüfusundan daha fazla mikroorganizma bulunur.",
-    "Kelebekler ayaklarıyla tat alır; bir çiçeğe konduklarında onu ayaklarıyla tadarlar.",
-    "Baykuşlar boyunlarını 270 dereceye kadar çevirebilir çünkü göz küreleri hareket etmez.",
-    "Bambü, dünyanın en hızlı büyüyen bitkisidir; bazı türleri günde 90 santimetre büyüyebilir.",
-    "Bir karınca kendi ağırlığının 50 katına kadar yük taşıyabilir.",
-    "Deniz otu çayırları, tropik yağmur ormanlarından bile daha hızlı karbon depolayabilir.",
-    "Ağaçlar birbirlerine kimyasal sinyaller göndererek zararlı böcek saldırılarına karşı komşularını uyarabilir.",
-    "Bal arıları, kovanlarına dönüş yolunu bulmak için Güneş'in konumunu pusula gibi kullanır.",
-    "Kutup ayılarının derisi aslında siyahtır; kürkleri ışığı yansıttığı için beyaz görünür.",
-    "Fillerin ayak tabanlarındaki hassas sinirler, kilometrelerce uzaktaki depremleri algılayabilir.",
-    "Dünyadaki tüm canlı biyokütlenin yarısından fazlasını bitkiler oluşturur.",
-    "Ahtapotlar üç kalbe sahiptir; ikisi solungaçlara, biri vücudun geri kalanına kan pompalar.",
-    "Kunduzların yaptığı barajlar, zamanla küçük göller oluşturarak yüzlerce türe yaşam alanı sağlar.",
-    "Yarasalar, tozlaşmadan tohum yayılımına kadar birçok tropik bitkinin hayatta kalması için kritik öneme sahiptir.",
-    "Denizanaları 500 milyon yıldan uzun süredir var olan, dinozorlardan bile daha eski canlılardır.",
-    "Bir tek balina, yaşamı boyunca karbondioksit tutma açısından binlerce ağaca bedel olabilir.",
-    "Panda ayıları günde 12 saate kadar sadece bambu yiyerek geçirebilir.",
-    "Mercan resifleri, okyanus tabanının yalnızca küçük bir kısmını kaplamasına rağmen deniz canlılarının çeyreğine ev sahipliği yapar.",
-    "Bir çita, saatte 110 kilometreye kadar hız yapabilir ama bu hızı yalnızca birkaç saniye sürdürebilir.",
-    "Bir semender, kopan bir uzvunu yeniden büyütebilir.",
-    "Deniz kaplumbağaları, doğdukları plaja yıllar sonra yumurtlamak için geri dönebilir.",
-    "Timsahlar, dişlerini yaşamları boyunca defalarca yenileyebilir.",
-    "Ağustosböcekleri, toprak altında 17 yıla kadar larva olarak yaşayabilir.",
-    "Yunuslar, birbirlerini tanımak için özel ıslık sesleri (imza ıslıkları) kullanır.",
-    "Denizatları, yumurtaları erkek bireyin karnında taşıması ve doğurmasıyla hayvanlar aleminde eşsizdir.",
-]
-
-SPECIAL_ENVIRONMENTAL_DAYS = {
-    (3, 3): ("Dünya Yaban Hayatı Günü", "#DünyaYabanHayatıGünü", "yaban hayatı ve koruma altındaki canlı türleri"),
-    (3, 21): ("Dünya Ormancılık Günü", "#DünyaOrmancılıkGünü", "dünyanın ormanları ve ağaçların hayati önemi"),
-    (3, 22): ("Dünya Su Günü", "#DünyaSuGünü", "su kaynakları, nehirler ve su ekosistemleri"),
-    (4, 22): ("Dünya Günü (Earth Day)", "#DünyaGünü #EarthDay", "gezegenimizin ekosistemi ve doğayı koruma bilinci"),
-    (5, 20): ("Dünya Arı Günü", "#DünyaArıGünü", "arılar, tozlaşma ve yaşamın devamındaki kritik rolleri"),
-    (5, 22): ("Dünya Biyoçeşitlilik Günü", "#BiyoçeşitlilikGünü", "gezegenimizdeki canlı türlerinin zenginliği"),
-    (6, 5): ("Dünya Çevre Günü", "#DünyaÇevreGünü", "çevre bilinci ve doğanın korunması"),
-    (6, 8): ("Dünya Okyanus Günü", "#DünyaOkyanusGünü", "okyanuslar, denizler ve su altı yaşamı"),
-    (10, 4): ("Dünya Hayvanları Koruma Günü", "#DünyaHayvanlarıKorumaGünü", "hayvanlar alemi ve onları koruma çabaları"),
-    (12, 11): ("Dünya Dağ Günü", "#DünyaDağGünü", "dağlar, yüksek ekosistemler ve dağ yaşamı"),
-}
-
-WEEKDAY_CONCEPTS = {
-    0: ("Dev Ağaçlar ve Ormanlar", "#ForestMonday", ["forest", "trees", "woodland"]),
-    1: ("Büyüleyici Bitkiler ve Mantarlar", "#PlantTuesday", ["plants", "flowers", "mushrooms"]),
-    2: ("Yaban Hayatı ve Doğa Canlıları", "#WildlifeWednesday", ["wildlife", "animals", "jungle"]),
-    3: ("Dağlar, Vadiler ve Doğal Oluşumlar", "#EarthThursday", ["mountains", "canyon", "valley"]),
-    4: ("Okyanuslar, Denizler ve Su Altı", "#OceanFriday", ["ocean", "underwater", "sea"]),
-    5: ("Kuşlar ve Gökyüzü Canlıları", "#SkySaturday", ["birds", "eagle", "flying"]),
-    6: ("Biyoçeşitlilik ve Ekosistemler", "#NatureSunday", ["nature", "rainforest", "landscape"]),
-}
-
-ENGAGEMENT_QUESTIONS = [
-    "Siz hayatınızda gördüğünüz en yaşlı ağacı hatırlıyor musunuz? 🌳",
-    "Bu bilgiyi daha önce biliyor muydunuz? 🤔",
-    "Sizce doğanın en şaşırtıcı sırrı hangisi? 🌿",
-    "Bugüne kadar gördüğünüz en etkileyici doğa manzarası neresiydi? 🏞️",
-    "Bu türü daha önce hiç görme şansınız oldu mu? 👀",
-    "Doğada en çok hangi canlıyı gözlemlemeyi seversiniz? 🦋",
-    "Bu bilgi sizi de benim kadar şaşırttı mı? ✨",
-    "Sizce ormanların en kıymetli hazinesi ne olabilir? 🌲",
-]
+COOKIES_FILE = "cookies.json"
+client = Client("en-US")
 
 
-def get_seasonal_keywords() -> list[str]:
-    month = datetime.now().month
-    if month in (12, 1, 2):
-        return ["winter", "snow"]
-    elif month in (3, 4, 5):
-        return ["spring", "bloom"]
-    elif month in (6, 7, 8):
-        return ["summer", "green"]
-    else:
-        return ["autumn", "fall"]
-
-
-def get_today_topic_and_hashtags() -> tuple[str, str, list[str]]:
-    now = datetime.now()
-    today_key = (now.month, now.day)
-
-    if today_key in SPECIAL_ENVIRONMENTAL_DAYS:
-        event_name, hashtag, focus = SPECIAL_ENVIRONMENTAL_DAYS[today_key]
-        print(f"🎉 Özel Gün Algılandı: {event_name}")
-        full_hashtags = f"{hashtag} {BASE_HASHTAGS}"
-        prompt_instruction = f"Bugün {event_name}! Özellikle {focus} hakkında ilginç, etkileyici ve bugünün anlam ve önemine uygun bir bilgi yaz."
-        search_keywords = ["nature", "environment"]
-        return prompt_instruction, full_hashtags, search_keywords
-
-    weekday = now.weekday()
-    concept_name, concept_hashtag, concept_keywords = WEEKDAY_CONCEPTS[weekday]
-    print(f"📅 Günlük Konsept Algılandı ({now.strftime('%A')}): {concept_name}")
-    full_hashtags = f"{concept_hashtag} {BASE_HASHTAGS}"
-    prompt_instruction = f"Bugünün teması '{concept_name}'. Özellikle bu konu hakkında ilginç, az bilinen bir bilgi yaz."
-
-    return prompt_instruction, full_hashtags, concept_keywords
-
-
-def generate_with_groq(prompt: str) -> tuple[str, str]:
-    """Groq API ile metin üretir."""
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY tanımlanmamış.")
-
-    resp = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-        json={
-            "model": "llama-3.3-70b-versatile",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 300,
-        },
-        timeout=20,
-    )
-    resp.raise_for_status()
-    text = resp.json()["choices"][0]["message"]["content"].strip()
-    return text, "Groq (Llama-3.3-70b)"
-
-
-def generate_nature_fact(prompt_instruction: str) -> tuple[str, str]:
-    """1. Gemini, 2. Groq, 3. Sabit bilgi havuzunu dener.
-    Dönen değerler: (Bilgi Metni, Yapay Zeka Model İsmi)"""
-    prompt = (
-        f"{prompt_instruction}\n"
-        "Direkt metinle başla. Giriş/çıkış açıklaması yapma, tırnak işareti veya "
-        "'İşte bilgi:' gibi ifadeler kullanma. Soru EKLEME, sadece bilgiyi yaz. "
-        "Toplam uzunluk maksimum 200 karakter olsun."
-    )
-
-    if GEMINI_API_KEY:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        model_name = "gemini-2.0-flash"
-        for attempt in range(3):
-            try:
-                print(f"Gemini isteği gönderiliyor: Model={model_name}, Deneme={attempt + 1}")
-                response = client.models.generate_content(model=model_name, contents=prompt)
-                return response.text.strip(), f"Google Gemini ({model_name})"
-            except Exception as e:
-                print(f"Gemini API uyarısı ({model_name}): {e}")
-                time.sleep(5)
-
-    print("⚠️ Gemini yanıt veremedi. Groq API'ye geçiliyor...")
-    try:
-        return generate_with_groq(prompt)
-    except Exception as e:
-        print(f"Groq API uyarısı: {e}")
-
-    print("⚠️ Groq da yanıt veremedi. Ücretsiz sabit bilgi havuzuna düşülüyor...")
-    return random.choice(FALLBACK_FACTS), "Sabit Bilgi Havuzu"
-
-
-def fetch_unsplash_photo(query_str: str) -> dict:
-    resp = requests.get(
-        "https://api.unsplash.com/photos/random",
-        params={"query": query_str, "orientation": "landscape"},
-        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
-def get_unsplash_image_url(concept_keywords: list[str]) -> str:
-    selected_concept = random.choice(concept_keywords)
-    selected_season = random.choice(get_seasonal_keywords())
-
-    query_candidates = [
-        f"{selected_season} {selected_concept}",
-        selected_concept,
-        "nature",
-    ]
-
-    for query_str in query_candidates:
+def send_telegram_log(message: str):
+    """Sadece sana Telegram'dan gizli bildirim atar."""
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
-            print(f"Unsplash araması deneniyor: '{query_str}'")
-            data = fetch_unsplash_photo(query_str)
-            return data["urls"]["regular"]
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "Markdown",
+            }
+            requests.post(url, json=payload, timeout=10)
         except Exception as e:
-            print(f"Unsplash sorgusu hatası ('{query_str}'): {e}. Yedek sorguya geçiliyor...")
-            time.sleep(1)
-
-    raise RuntimeError("Unsplash API hiçbir arama sorgusuna görsel döndüremedi.")
+            print(f"Telegram log hatası: {e}")
 
 
-def send_telegram_notification(text: str, image_url: str, ai_model: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    caption = (
-        f"✅ **Yeni Paylaşım Yapıldı!**\n\n"
-        f"{text}\n\n"
-        f"🤖 **Üretici AI:** `{ai_model}`"
+async def login():
+    print("🔑 X oturumu kontrol ediliyor...")
+    if X_COOKIES_JSON and X_COOKIES_JSON.strip():
+        try:
+            cookies_dict = json.loads(X_COOKIES_JSON.strip())
+            client.set_cookies(cookies_dict)
+            print("✅ Environment 'X_COOKIES_JSON' üzerinden oturum yüklendi.")
+            return
+        except Exception as e:
+            print(f"⚠️ Environment cookies okuma hatası: {e}")
+
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        try:
+            with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+                cookies_dict = json.load(f)
+                client.set_cookies(cookies_dict)
+                print("✅ Yerel 'cookies.json' dosyasından oturum yüklendi.")
+                return
+        except Exception as e:
+            print(f"⚠️ Dosya cookies okuma hatası: {e}")
+
+    print("⚠️ Çerez bulunamadı, kullanıcı bilgileriyle giriş deneniyor...")
+    await client.login(
+        auth_info_1=X_USERNAME, auth_info_2=X_EMAIL, password=X_PASSWORD
     )
-    try:
-        requests.post(
-            telegram_url,
-            json={"chat_id": TELEGRAM_CHAT_ID, "photo": image_url, "caption": caption, "parse_mode": "Markdown"},
-            timeout=10,
-        )
-        print("Telegram başarı bildirimi gönderildi!")
-    except Exception as e:
-        print(f"Telegram bildirim hatası: {e}")
 
 
-def send_telegram_error(error_message: str) -> None:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    text = (
-        "⚠️ **Doğa Botu Hata Bildirimi!**\n\n"
-        "Sistem otomatik paylaşım yaparken bir sorunla karşılaştı.\n\n"
-        f"**Hata Detayı:**\n`{error_message}`"
-    )
-    try:
-        requests.post(
-            telegram_url,
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        )
-        print("Hata bildirimi Telegram'a gönderildi.")
-    except Exception as e:
-        print(f"Hata bildirimi gönderilemedi: {e}")
-
-
-def buffer_graphql(query: str, variables: dict | None = None) -> dict:
-    resp = requests.post(
-        BUFFER_API_URL,
-        headers={"Authorization": f"Bearer {BUFFER_API_KEY}", "Content-Type": "application/json"},
-        json={"query": query, "variables": variables or {}},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if "errors" in data and data["errors"]:
-        raise RuntimeError(f"Buffer API hatası: {data['errors']}")
-    return data["data"]
-
-
-def get_organization_id() -> str:
-    data = buffer_graphql("query GetOrganizations { account { organizations { id name } } }")
-    orgs = data["account"]["organizations"]
-    if not orgs:
-        raise RuntimeError("Buffer hesabında hiç organizasyon bulunamadı.")
-    return orgs[0]["id"]
-
-
-def get_channel_ids(organization_id: str) -> dict[str, str]:
-    data = buffer_graphql(
-        """
-        query GetChannels($organizationId: OrganizationId!) {
-          channels(input: { organizationId: $organizationId }) {
-            id
-            service
-          }
-        }
-        """,
-        {"organizationId": organization_id},
-    )
-    channels: dict[str, str] = {}
-    for ch in data["channels"]:
-        service = "twitter" if ch["service"] == "x" else ch["service"]
-        channels[service] = ch["id"]
-    return channels
-
-
-def create_post(channel_id: str, text: str, image_url: str, reply_text: str | None = None) -> None:
-    if reply_text:
-        input_data = {
-            "text": text,
-            "channelId": channel_id,
-            "schedulingType": "automatic",
-            "mode": "shareNow",
-            "metadata": {
-                "twitter": {
-                    "thread": [
-                        {"text": text, "assets": [{"image": {"url": image_url}}]},
-                        {"text": reply_text},
-                    ]
-                }
-            },
-        }
-    else:
-        input_data = {
-            "text": text,
-            "channelId": channel_id,
-            "schedulingType": "automatic",
-            "mode": "shareNow",
-            "assets": [{"image": {"url": image_url}}],
-        }
-
-    data = buffer_graphql(
-        """
-        mutation CreatePost($input: CreatePostInput!) {
-          createPost(input: $input) {
-            ... on PostActionSuccess {
-              post { id text dueAt }
-            }
-            ... on MutationError {
-              message
-            }
-          }
-        }
-        """,
-        {"input": input_data},
-    )
-    result = data["createPost"]
-    if "message" in result:
-        raise RuntimeError(f"Post oluşturulamadı: {result['message']}")
-    print("Paylaşıldı:", result["post"])
-
-
-def generate_reply_for_tweet(tweet_text: str, author_handle: str) -> tuple[str, str]:
-    """Başka bir Twitter hesabının paylaşımına mantıklı ve olumlu AI yorumu üretir."""
+def generate_ai_tweet():
+    """Sabit havuz kaldırıldı! Sadece Gemini ve Groq üretir."""
     prompt = (
-        f"Aşağıdaki Twitter paylaşımına uygun, olumlu, merak uyandırıcı ve doğal bir yorum yaz.\n"
-        f"Hesap: @{author_handle}\n"
-        f"Tweet: '{tweet_text}'\n"
-        f"Sadece yazılacak yorum metnini döndür. Maksimum 180 karakter olsun."
+        "Sen doğa, okyanus, canlılar dünyası ve çevre hakkında büyüleyici bilgiler paylaşan uzman bir içerik üreticisisin. "
+        "Takipçilerin ilgisini çekecek, samimi ve merak uyandıran 1 adet Türkçe X (Twitter) gönderisi yaz.\n\n"
+        "Kurallar:\n"
+        "- İçerik tamamen doğa, deniz canlıları, hayvanlar veya ekosistem ile ilgili olsun.\n"
+        "- Maksimum 200 karakter olsun.\n"
+        "- En fazla 3 adet alakalı hashtag ekle (#doğa #nature gibi).\n"
+        "- Kesinlikle 'Üretici:', 'Bot:', 'Sabit Havuz' veya kaynak/dipnot etiketleri EKLEME."
     )
-    
+
+    # 1. Öncelik: Gemini API
     if GEMINI_API_KEY:
         try:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-            return res.text.strip(), "Google Gemini (gemini-2.0-flash)"
+            ai_client = genai.Client(api_key=GEMINI_API_KEY)
+            response = ai_client.models.generate_content(
+                model="gemini-2.0-flash", contents=prompt
+            )
+            if response.text:
+                return response.text.strip(), "Gemini 2.0 Flash"
         except Exception as e:
-            print("Gemini yorum üretme hatası:", e)
+            print(f"⚠️ Gemini tweet üretimi başarısız, Groq'a geçiliyor: {e}")
 
-    try:
-        reply_text, ai_model = generate_with_groq(prompt)
-        return reply_text, ai_model
-    except Exception as e:
-        print("Groq yorum üretme hatası:", e)
-        
-    return "Harika bir içerik ve bilgilendirme! Doğa gerçekten her gün şaşırtmaya devam ediyor. 🌿", "Sabit Yanıt Havuzu"
+    # 2. Öncelik (Yedek): Groq API
+    if GROQ_API_KEY:
+        try:
+            groq_client = Groq(api_key=GROQ_API_KEY)
+            completion = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=150,
+            )
+            if completion.choices[0].message.content:
+                return completion.choices[0].message.content.strip(), (
+                    "Groq (Llama-3.3)"
+                )
+        except Exception as e:
+            print(f"⚠️ Groq tweet üretimi başarısız: {e}")
+
+    raise Exception(
+        "❌ Hiçbir Yapay Zeka servisi çalışmadı! API anahtarlarını kontrol et."
+    )
 
 
-def main() -> None:
-    try:
-        org_id = get_organization_id()
-        channels = get_channel_ids(org_id)
+async def post_daily_tweet():
+    await login()
 
-        prompt_instruction, hashtags, concept_keywords = get_today_topic_and_hashtags()
-        
-        # Yapay zekadan bilgi ve hangi AI modelinin ürettiği bilgisini çekiyoruz
-        fact, ai_model = generate_nature_fact(prompt_instruction)
-        
-        # Paylaşılacak metin ve yapay zeka imzamız
-        text = f"{fact}\n\n{hashtags}\n\n🤖 Üretici: {ai_model}"
-        
-        question = random.choice(ENGAGEMENT_QUESTIONS)
-        image_url = get_unsplash_image_url(concept_keywords)
+    # 1. Yapay Zekadan Tweet ve Hangi AI Üretti Bilgisi Alınır
+    tweet_text, ai_model = generate_ai_tweet()
 
-        if "twitter" in channels:
-            create_post(channels["twitter"], text, image_url, reply_text=question)
-        else:
-            print("Uyarı: Buffer'a bağlı bir X/Twitter kanalı bulunamadı, atlanıyor.")
+    # 2. X'e SADECE TEMİZ TWEET ATILIR (X'te "Üretici:" vs. gözükmez!)
+    print(f"🚀 Tweet Paylaşılıyor ({ai_model}):\n{tweet_text}")
+    await client.create_tweet(text=tweet_text)
 
-        if "instagram" in channels:
-            create_post(channels["instagram"], text, image_url)
-        else:
-            print("Uyarı: Buffer'a bağlı bir Instagram kanalı bulunamadı, atlanıyor.")
-
-        send_telegram_notification(text, image_url, ai_model)
-
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Kritik Hata: {error_msg}")
-        send_telegram_error(error_msg)
-        raise e
+    # 3. Sana Özel Telegram Bildirimi (AI Modeli Burada Yazar)
+    telegram_msg = (
+        f"✅ **Yeni Doğa Tweeti Paylaşıldı!**\n\n"
+        f"📝 **İçerik:**\n{tweet_text}\n\n"
+        f"🤖 **Kullanılan AI:** `{ai_model}`"
+    )
+    send_telegram_log(telegram_msg)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(post_daily_tweet())
