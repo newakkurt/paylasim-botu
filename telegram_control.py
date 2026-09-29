@@ -33,6 +33,7 @@ COMMANDS = {
     "/hava": "weather_bot.py",
     "/video": "video_bot.py",
     "/izle": "twitter_monitor.py",
+    "/otobüyüme": "auto_growth.py",
 }
 
 
