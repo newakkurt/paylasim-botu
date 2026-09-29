@@ -1,14 +1,19 @@
 import json
 import os
+import sys
 import requests
 import tweepy
 from google import genai
+
+# Log tamponlamasını kapat
+sys.stdout.reconfigure(line_buffering=True)
 
 # Ortam Değişkenleri
 TWITTER_API_KEY = os.environ.get("TWITTER_API_KEY")
 TWITTER_API_SECRET = os.environ.get("TWITTER_API_SECRET")
 TWITTER_ACCESS_TOKEN = os.environ.get("TWITTER_ACCESS_TOKEN")
 TWITTER_ACCESS_SECRET = os.environ.get("TWITTER_ACCESS_SECRET")
+TWITTER_BEARER_TOKEN = os.environ.get("TWITTER_BEARER_TOKEN") # İsteğe bağlı / Ekstra güçlendirme
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
@@ -33,10 +38,12 @@ TARGET_ACCOUNTS = [
 
 def get_twitter_client() -> tweepy.Client:
     return tweepy.Client(
+        bearer_token=TWITTER_BEARER_TOKEN if TWITTER_BEARER_TOKEN else None,
         consumer_key=TWITTER_API_KEY,
         consumer_secret=TWITTER_API_SECRET,
         access_token=TWITTER_ACCESS_TOKEN,
         access_token_secret=TWITTER_ACCESS_SECRET,
+        wait_on_rate_limit=True
     )
 
 
@@ -143,7 +150,6 @@ def send_telegram_approval_request(tweet_id: str, author_handle: str, tweet_text
 
 
 def check_target_accounts() -> None:
-    # 'ALL' yerine küçük harf 'all' kullanıldı
     if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET]):
         print("Twitter API anahtarları tanımlı değil, izleme atlanıyor.")
         return
@@ -153,15 +159,17 @@ def check_target_accounts() -> None:
 
     for handle in TARGET_ACCOUNTS:
         try:
-            print(f"🔍 Kontrol ediliyor: @{handle}")
+            print(f"🔍 Kontrol edilirken: @{handle}")
             user = client.get_user(username=handle)
             if not user or not user.data:
+                print(f"⚠️ Kullanıcı bulunamadı: @{handle}")
                 continue
 
             user_id = user.data.id
             tweets = client.get_users_tweets(id=user_id, max_results=5, tweet_fields=["created_at"])
 
             if not tweets or not tweets.data:
+                print(f"ℹ️ Son tweet bulunamadı: @{handle}")
                 continue
 
             for tweet in tweets.data:
@@ -176,6 +184,9 @@ def check_target_accounts() -> None:
                 save_seen_tweet(tweet_id)
                 break
 
+        except tweepy.errors.Unauthorized as e:
+            print(f"❌ @{handle} hesabı kontrol edilirken 401 Unauthorized Hatası: API Anahtarlarını ve App İzinlerini Kontrol Edin.")
+            break
         except Exception as e:
             print(f"@{handle} hesabı kontrol edilirken hata: {e}")
 
