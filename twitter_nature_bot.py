@@ -76,7 +76,7 @@ Sadece paylaşım metnini yaz.
     client = Groq(api_key=GROQ_API_KEY)
 
     result = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="openai/gpt-oss-20b",
         messages=[
             {
                 "role": "user",
