@@ -9,85 +9,112 @@ import requests
 # ============================================================
 # TWIKIT KEY_BYTE PATCH
 # ============================================================
+#
+# X, Mart 2026'da ondemand.s.js formatını değiştirdi.
+# Twikit 2.3.3'ün eski regex'i bu nedenle:
+#     Couldn't get KEY_BYTE indices
+# hatası verebiliyor.
+#
+# Bu patch, güncel topluluk düzeltmesini uygular:
+# 1) X ana sayfasındaki ondemand.s indeksini bulur
+# 2) ilgili hash'i bulur
+# 3) gerçek ondemand.s.<hash>a.js dosyasını indirir
+# 4) KEY_BYTE indekslerini o JS içinden çıkarır
+#
+# Patch, "from twikit import Client" IMPORT'undan önce çalışmalıdır.
 
 try:
     import twikit.x_client_transaction.transaction as tx
 
-    _orig_get_indices = tx.ClientTransaction.get_indices
+    tx.ON_DEMAND_FILE_REGEX = re.compile(
+        r""",(\d+):["']ondemand\.s["']""",
+        flags=(re.VERBOSE | re.MULTILINE)
+    )
 
-    async def _patched_get_indices(self, response_text, *args, **kwargs):
-        try:
-            return await _orig_get_indices(
-                self,
-                response_text,
-                *args,
-                **kwargs
+    tx.ON_DEMAND_HASH_PATTERN = r',{}:"([0-9a-f]+)"'
+
+    async def _patched_get_indices(
+        self,
+        home_page_response,
+        session,
+        headers
+    ):
+        key_byte_indices = []
+
+        response = (
+            self.validate_response(home_page_response)
+            or self.home_page_response
+        )
+
+        response_text = str(response)
+
+        # Yeni X formatı:
+        # ,<index>:"ondemand.s"
+        on_demand_file = tx.ON_DEMAND_FILE_REGEX.search(response_text)
+
+        if not on_demand_file:
+            raise Exception(
+                "X ana sayfasında ondemand.s referansı bulunamadı."
             )
 
-        except Exception as original_error:
+        on_demand_file_index = on_demand_file.group(1)
 
-            # Twikit bazı sürümlerde BeautifulSoup nesnesi
-            # gönderebiliyor. Önce güvenli şekilde string'e çeviriyoruz.
-            if hasattr(response_text, "get_text"):
-                text = response_text.get_text()
-            else:
-                text = str(response_text)
+        # Aynı index'e karşılık gelen hash:
+        # ,<index>:"<hash>"
+        hash_regex = re.compile(
+            tx.ON_DEMAND_HASH_PATTERN.format(
+                on_demand_file_index
+            )
+        )
 
-            # KEY_BYTE değerlerini bulmaya çalış
-            row_index_match = re.search(
-                r'\((\d+)\)',
-                text
+        hash_match = hash_regex.search(response_text)
+
+        if not hash_match:
+            raise Exception(
+                "ondemand.s hash değeri bulunamadı."
             )
 
-            key_bytes_match = re.search(
-                r'\[([\d,\s]+)\]',
-                text
+        filename = hash_match.group(1)
+
+        on_demand_file_url = (
+            "https://abs.twimg.com/"
+            "responsive-web/client-web/"
+            f"ondemand.s.{filename}a.js"
+        )
+
+        on_demand_file_response = await session.request(
+            method="GET",
+            url=on_demand_file_url,
+            headers=headers
+        )
+
+        key_byte_indices_match = tx.INDICES_REGEX.finditer(
+            str(on_demand_file_response.text)
+        )
+
+        for item in key_byte_indices_match:
+            key_byte_indices.append(item.group(2))
+
+        if not key_byte_indices:
+            raise Exception(
+                "Couldn't get KEY_BYTE indices"
             )
 
-            if row_index_match and key_bytes_match:
+        key_byte_indices = list(
+            map(int, key_byte_indices)
+        )
 
-                row_index = int(
-                    row_index_match.group(1)
-                )
+        print(
+            "✅ KEY_BYTE patch başarılı: "
+            f"indices={key_byte_indices}"
+        )
 
-                key_bytes = [
-                    int(x.strip())
-                    for x in key_bytes_match.group(1).split(",")
-                ]
-
-                print(
-                    "✅ KEY_BYTE patch başarılı: "
-                    f"row_index={row_index}, "
-                    f"key_bytes={key_bytes}"
-                )
-
-                return row_index, key_bytes
-
-            print(
-                "⚠️ KEY_BYTE otomatik patch'i başarısız."
-            )
-
-            print(
-                f"Twikit hatası: {original_error}"
-            )
-
-            print(
-                f"Response tipi: {type(response_text).__name__}"
-            )
-
-            print(
-                f"Response başlangıcı: {text[:500]}"
-            )
-
-            # Orijinal hatayı koru
-            raise original_error
+        return (
+            key_byte_indices[0],
+            key_byte_indices[1:]
+        )
 
     tx.ClientTransaction.get_indices = _patched_get_indices
-
-    tx.ON_DEMAND_FILE_REGEX = re.compile(
-        r'https://abs\.twimg\.com/responsive-web/client-web/'
-        r'ondemand\.s\.[a-z0-9]+a\.js'
-    )
 
     print("✅ Twikit KEY_BYTE patch aktif.")
 
@@ -322,6 +349,18 @@ async def login():
     print(
         "✅ X giriş başarılı."
     )
+
+    # Sonraki çalıştırmalarda tekrar login olmamak için
+    # Twikit session cookie'lerini kaydet.
+    try:
+        client.save_cookies(COOKIES_FILE)
+        print(
+            f"🍪 X cookie oturumu kaydedildi: {COOKIES_FILE}"
+        )
+    except Exception as e:
+        print(
+            f"⚠️ Cookie kaydedilemedi: {e}"
+        )
 
 
 # ============================================================
