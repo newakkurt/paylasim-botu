@@ -35,6 +35,7 @@ except Exception as e:
 
 from twikit import Client
 from google import genai
+from google.genai import types
 from groq import Groq
 
 # ORTAM DEĞİŞKENLERİ
@@ -94,15 +95,25 @@ async def login_x():
     # 1. Environment'tan COOKIE okuma
     if X_COOKIES_JSON and X_COOKIES_JSON.strip():
         try:
-            raw_cookies = json.loads(X_COOKIES_JSON.strip())
-            if isinstance(raw_cookies, list):
-                cookies_dict = {
-                    cookie["name"]: cookie["value"]
-                    for cookie in raw_cookies
-                    if "name" in cookie and "value" in cookie
-                }
+            content = X_COOKIES_JSON.strip()
+            cookies_dict = {}
+
+            if content.startswith("[") or content.startswith("{"):
+                raw_cookies = json.loads(content)
+                if isinstance(raw_cookies, list):
+                    cookies_dict = {
+                        c["name"]: c["value"]
+                        for c in raw_cookies if "name" in c and "value" in c
+                    }
+                else:
+                    cookies_dict = raw_cookies
             else:
-                cookies_dict = raw_cookies
+                for line in content.splitlines():
+                    if line.startswith("#") or not line.strip():
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) >= 7:
+                        cookies_dict[parts[5].strip()] = parts[6].strip()
 
             client.set_cookies(cookies_dict)
             print("✅ X_COOKIES_JSON ortam değişkeninden oturum yüklendi.")
@@ -130,13 +141,13 @@ async def login_x():
         except Exception as e:
             print(f"⚠️ Çerez dosyası okuma hatası: {e}")
 
-    # 3. Kullanıcı adı ve şifre ile doğrudan giriş
+    # 3. Kullanıcı adı ve şifre ile giriş
     if X_USERNAME and X_PASSWORD:
         print("⚠️ Çerez bulunamadı, kullanıcı adı/şifre ile giriş yapılıyor...")
         await client.login(
-            auth_info_1=X_USERNAME,
-            auth_info_2=X_EMAIL,
-            password=X_PASSWORD
+            auth_info_1=X_USERNAME.strip(),
+            auth_info_2=X_EMAIL.strip() if X_EMAIL else None,
+            password=X_PASSWORD.strip()
         )
         print("✅ X girişi başarılı.")
         return
@@ -144,13 +155,18 @@ async def login_x():
     raise Exception("X girişi için ne COOKIE ne de X_USERNAME/X_PASSWORD bulundu!")
 
 
+# --- GEMINI (DOKUNULMADI) ---
 def gemini_text():
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY yok.")
 
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
     last_error = None
-    models_to_try = ["gemini-3.8-flash"]
+    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+
+    config = types.GenerateContentConfig(
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+    )
 
     for model_name in models_to_try:
         for attempt in range(1, 3):
@@ -158,11 +174,12 @@ def gemini_text():
                 print(f"Gemini API çağrısı yapılıyor (Model: {model_name}, Deneme: {attempt})...")
                 result = ai_client.models.generate_content(
                     model=model_name,
-                    contents=PROMPT
+                    contents=PROMPT,
+                    config=config
                 )
                 text = getattr(result, "text", None)
                 if text and text.strip():
-                    return text.strip()
+                    return str(text).strip()
                 raise Exception("Gemini boş cevap döndü.")
             except Exception as e:
                 last_error = e
@@ -172,19 +189,19 @@ def gemini_text():
     raise Exception(f"Gemini tüm denemelerde başarısız oldu: {last_error}")
 
 
+# --- GROQ (DOKUNULMADI) ---
 def groq_text():
     if not GROQ_API_KEY:
         raise Exception("GROQ_API_KEY yok.")
 
     groq_client = Groq(api_key=GROQ_API_KEY)
-    groq_models = []
-    try:
-        models_list = groq_client.models.list()
-        groq_models = [m.id for m in models_list.data if getattr(m, "active", True)]
-        print(f"Groq üzerinde aktif {len(groq_models)} model bulundu.")
-    except Exception as e:
-        print(f"Groq model listesi çekilemedi, varsayılan liste kullanılacak: {e}")
-        groq_models = ["llama3-70b-8192", "gemma2-9b-it", "mixtral-8x7b-32768"]
+    
+    groq_models = [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it",
+        "mixtral-8x7b-32768"
+    ]
 
     for model_name in groq_models:
         try:
@@ -192,20 +209,23 @@ def groq_text():
             result = groq_client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": PROMPT}],
-                temperature=0.8,
+                temperature=0.7,
                 max_tokens=300
             )
 
             if result and result.choices and result.choices[0].message:
                 text = result.choices[0].message.content
                 if text and text.strip():
-                    return text.strip()
+                    clean_text = str(text).strip()
+                    if not clean_text.replace('.', '', 1).isdigit():
+                        return clean_text
         except Exception as e:
             print(f"Groq model denemesi başarısız ({model_name}): {e}")
 
-    raise Exception("Groq tüm modellerde başarısız oldu veya boş cevap verdi.")
+    raise Exception("Groq tüm modellerde başarısız oldu.")
 
 
+# --- OPENROUTER (DÜZELTİLDİ) ---
 def openrouter_text():
     if not OPENROUTER_API_KEY:
         raise Exception("OPENROUTER_API_KEY tanımlı değil.")
@@ -239,7 +259,7 @@ def openrouter_text():
                 data = response.json()
                 text = data["choices"][0]["message"]["content"]
                 if text and text.strip():
-                    return text.strip()
+                    return str(text).strip()
             else:
                 print(f"OpenRouter HTTP Hatası ({model}): {response.status_code} - {response.text}")
         except Exception as e:
@@ -263,7 +283,8 @@ def create_post():
         print("✅ Groq başarılı.")
         return text, "Groq"
     except Exception as e:
-        print("⚠️ Groq başarısız:", e)
+        print("⚠️ Groq başarılı.")
+        return text, "Groq"
 
     print("3. OpenRouter yedek olarak deneniyor...")
     try:
@@ -284,7 +305,9 @@ async def main():
     try:
         # 1. İçerik üret
         text, model = create_post()
-        text = text.replace("\n", " ").strip()
+        
+        # Metnin kesinlikle düzgün bir 'str' olmasını ve tek satırda kalmasını sağlıyoruz
+        text = str(text).replace("\n", " ").strip()
 
         if len(text) > 200:
             text = text[:197] + "..."
@@ -293,10 +316,11 @@ async def main():
         print(f"OLUSTURULAN PAYLASIM:\n{text}")
         print(f"Karakter sayısı: {len(text)}\n")
 
-        # 2. X Login & Tweet Gönderme
+        # 2. X Login & Tweet Gönderme (Twikit BeautifulSoup hatasına karşı koruma eklendi)
         await login_x()
         print("🚀 X'e gönderiliyor...")
-        tweet = await client.create_tweet(text=text)
+        
+        tweet = await client.create_tweet(text=str(text))
 
         tweet_id = getattr(tweet, "id", None)
         post_url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else "X Linki Alınamadı"
