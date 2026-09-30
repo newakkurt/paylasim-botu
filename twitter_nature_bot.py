@@ -1,5 +1,7 @@
+```python
 import os
 import sys
+import time
 import requests
 from google import genai
 from groq import Groq
@@ -25,7 +27,7 @@ def send_telegram(message):
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": message
             },
-            timeout=20
+            timeout=30
         )
         print("Telegram bildirimi gönderildi.")
     except Exception as e:
@@ -36,44 +38,67 @@ def gemini_text():
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY yok.")
 
-    prompt = """
-Türkçe kısa bir doğa bilgisi üret.
-X paylaşımı için yaz.
-Maksimum 200 karakter.
-Gerçek ve doğrulanabilir bilgi kullan.
-En fazla 3 hashtag.
-Sadece paylaşım metnini yaz.
-"""
-
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    result = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt
-    )
+    prompt = """
+Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
 
-    text = (result.text or "").strip()
+Kurallar:
+- 1 veya 2 cümle olsun.
+- Maksimum 200 karakter olsun.
+- Gerçek ve doğrulanabilir bir bilgi olsun.
+- Sonuna 2 veya 3 uygun hashtag ekle.
+- Emoji kullanabilirsin.
+- Sadece paylaşım metnini döndür.
+"""
 
-    if not text:
-        raise Exception("Gemini boş cevap verdi.")
+    last_error = None
 
-    return text
+    for attempt in range(2):
+        try:
+            result = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt
+            )
+
+            text = getattr(result, "text", None)
+
+            if text:
+                text = text.strip()
+
+            if text:
+                return text
+
+            raise Exception("Gemini boş cevap verdi.")
+
+        except Exception as e:
+            last_error = e
+            print("Gemini denemesi başarısız:", e)
+
+            if attempt == 0:
+                print("Gemini tekrar deneniyor...")
+                time.sleep(5)
+
+    raise Exception("Gemini başarısız: " + str(last_error))
 
 
 def groq_text():
     if not GROQ_API_KEY:
         raise Exception("GROQ_API_KEY yok.")
 
-    prompt = """
-Türkçe kısa bir doğa bilgisi üret.
-X paylaşımı için yaz.
-Maksimum 200 karakter.
-Gerçek ve doğrulanabilir bilgi kullan.
-En fazla 3 hashtag.
-Sadece paylaşım metnini yaz.
-"""
-
     client = Groq(api_key=GROQ_API_KEY)
+
+    prompt = """
+Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
+
+Kurallar:
+- 1 veya 2 cümle olsun.
+- Maksimum 200 karakter olsun.
+- Gerçek ve doğrulanabilir bir bilgi olsun.
+- Sonuna 2 veya 3 uygun hashtag ekle.
+- Emoji kullanabilirsin.
+- Sadece paylaşım metnini döndür.
+"""
 
     result = client.chat.completions.create(
         model="openai/gpt-oss-20b",
@@ -83,11 +108,27 @@ Sadece paylaşım metnini yaz.
                 "content": prompt
             }
         ],
-        temperature=0.7,
-        max_tokens=150
+        temperature=0.8,
+        max_tokens=300
     )
 
-    text = result.choices[0].message.content.strip()
+    if not result:
+        raise Exception("Groq cevap nesnesi boş.")
+
+    if not result.choices:
+        raise Exception("Groq choices boş.")
+
+    message = result.choices[0].message
+
+    if not message:
+        raise Exception("Groq message boş.")
+
+    text = message.content
+
+    if not text:
+        raise Exception("Groq boş cevap verdi.")
+
+    text = text.strip()
 
     if not text:
         raise Exception("Groq boş cevap verdi.")
@@ -96,15 +137,26 @@ Sadece paylaşım metnini yaz.
 
 
 def create_post():
+    print("Gemini deneniyor...")
+
     try:
-        print("Gemini deneniyor...")
-        return gemini_text(), "Gemini"
+        text = gemini_text()
+        print("Gemini başarılı.")
+        return text, "Gemini"
 
     except Exception as e:
         print("Gemini başarısız:", e)
-        print("Groq yedek olarak deneniyor...")
 
-        return groq_text(), "Groq"
+    print("Groq yedek olarak deneniyor...")
+
+    try:
+        text = groq_text()
+        print("Groq başarılı.")
+        return text, "Groq"
+
+    except Exception as e:
+        print("Groq başarısız:", e)
+        raise Exception("Hem Gemini hem Groq başarısız oldu.")
 
 
 def post_x(text):
@@ -121,21 +173,27 @@ def post_x(text):
     response = requests.post(
         url,
         headers=headers,
-        json={"text": text},
+        json={
+            "text": text
+        },
         timeout=30
     )
 
-    print("X API:", response.status_code)
+    print("X API HTTP:", response.status_code)
 
     if not response.ok:
-        print(response.text)
-        raise Exception("X paylaşımı başarısız.")
+        print("X API cevabı:", response.text)
+        raise Exception(
+            "X paylaşımı başarısız. HTTP " + str(response.status_code)
+        )
 
     data = response.json()
 
-    post_id = data["data"]["id"]
+    if "data" not in data or "id" not in data["data"]:
+        print("X API beklenmeyen cevap:", data)
+        raise Exception("X gönderi ID'si alınamadı.")
 
-    return post_id
+    return data["data"]["id"]
 
 
 def main():
@@ -152,41 +210,44 @@ def main():
             text = text[:197] + "..."
 
         print()
-        print("PAYLASIM:")
-        print("-" * 60)
+        print("KULLANILAN MODEL:", model)
+        print()
+        print("OLUSTURULAN PAYLASIM:")
         print(text)
-        print("-" * 60)
-        print("Model:", model)
-        print("Karakter:", len(text))
+        print()
+        print("Karakter sayisi:", len(text))
+
+        print()
+        print("X'e gönderiliyor...")
 
         post_id = post_x(text)
 
         post_url = "https://x.com/i/web/status/" + post_id
 
-        print()
-        print("X PAYLASIMI BASARILI")
-        print(post_url)
+        print("X paylaşımı başarılı.")
+        print("Post ID:", post_id)
+        print("Post URL:", post_url)
 
-        send_telegram(
-            "🌿 Günlük Doğa İçeriği\n\n"
-            + text
-            + "\n\n"
-            + "🤖 Model: "
-            + model
-            + "\n"
-            + "✅ X paylaşımı başarılı\n"
-            + post_url
+        telegram_message = (
+            "DOGA ICERIK BOTU BASARILI\n\n"
+            "Model: " + model + "\n"
+            "Paylasim:\n" + text + "\n\n"
+            "X:\n" + post_url
         )
 
+        send_telegram(telegram_message)
+
+        print()
+        print("PROGRAM BASARIYLA TAMAMLANDI.")
         return 0
 
     except Exception as e:
         print()
         print("PROGRAM HATASI")
-        print(str(e))
+        print(e)
 
         send_telegram(
-            "❌ Doğa botu hata verdi:\n\n"
+            "DOGA ICERIK BOTU HATA VERDI\n\n"
             + str(e)
         )
 
@@ -195,3 +256,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+```
