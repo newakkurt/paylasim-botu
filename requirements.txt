@@ -9,3 +9,5 @@ google-generativeai
 groq
 requests
 git+https://github.com/d60/twikit.git
+
+twikit>=2.2.0
