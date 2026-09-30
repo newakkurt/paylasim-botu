@@ -162,7 +162,7 @@ def gemini_text():
 
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
     last_error = None
-    models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    models_to_try = ["gemini-3.8-flash"]
 
     config = types.GenerateContentConfig(
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
@@ -198,7 +198,7 @@ def groq_text():
     
     groq_models = [
         "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
+        "llama3-70b-8192",
         "gemma2-9b-it",
         "mixtral-8x7b-32768"
     ]
