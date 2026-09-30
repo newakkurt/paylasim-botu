@@ -87,15 +87,7 @@ def groq_text():
     client = Groq(api_key=GROQ_API_KEY)
 
     prompt = """
-Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
 
-Kurallar:
-- 1 veya 2 cümle olsun.
-- Maksimum 200 karakter olsun.
-- Gerçek ve doğrulanabilir bir bilgi olsun.
-- Sonuna 2 veya 3 uygun hashtag ekle.
-- Emoji kullanabilirsin.
-- Sadece paylaşım metnini döndür.
 
     result = client.chat.completions.create(
         model="openai/gpt-oss-20b",
