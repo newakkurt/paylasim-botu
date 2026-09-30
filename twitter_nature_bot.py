@@ -150,7 +150,7 @@ Kurallar:
 
     last_error = None
     # 503 geçici yoğunluk durumları için farklı modeller ve esnek deneme sayısı
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    models_to_try = ["gemini-3.8-flash",]
     
     for model_name in models_to_try:
         for attempt in range(1, 4):
@@ -190,7 +190,7 @@ Kurallar:
 """
 
     # Groq tarafında aktif ve geçerli modeller
-    groq_models = ["llama-3.3-70b-versatile", "llama3-8b-8192"]
+    groq_models = ["llama-3.3-70b-specdec", "llama-3.1-8b-instant"]
     
     for model_name in groq_models:
         try:
