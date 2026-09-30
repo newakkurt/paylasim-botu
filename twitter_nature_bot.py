@@ -77,7 +77,7 @@ def send_telegram(message: str):
 
 async def login_x():
     print("🔑 X oturumu açılıyor...")
-    
+
     # 1. Environment'tan COOKIE okuma
     if X_COOKIES_JSON and X_COOKIES_JSON.strip():
         try:
@@ -119,7 +119,7 @@ async def login_x():
 
     # 3. Kullanıcı adı ve şifre ile doğrudan giriş
     if X_USERNAME and X_PASSWORD:
-        print("⚠️️ Çerez bulunamadı, kullanıcı adı/şifre ile giriş yapılıyor...")
+        print("⚠️ Çerez bulunamadı, kullanıcı adı/şifre ile giriş yapılıyor...")
         await client.login(
             auth_info_1=X_USERNAME,
             auth_info_2=X_EMAIL,
@@ -149,24 +149,27 @@ Kurallar:
 """
 
     last_error = None
-    for attempt in range(1, 3):
-        try:
-            print(f"Gemini API çağrısı yapılıyor (Deneme {attempt})...")
-            result = ai_client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt
-            )
-            text = getattr(result, "text", None)
-            if text and text.strip():
-                return text.strip()
-            raise Exception("Gemini boş cevap döndü.")
-        except Exception as e:
-            last_error = e
-            print(f"Gemini denemesi başarısız: {e}")
-            if attempt == 1:
-                time.sleep(5)
+    # 503 geçici yoğunluk durumları için farklı modeller ve esnek deneme sayısı
+    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    
+    for model_name in models_to_try:
+        for attempt in range(1, 4):
+            try:
+                print(f"Gemini API çağrısı yapılıyor (Model: {model_name}, Deneme: {attempt})...")
+                result = ai_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                text = getattr(result, "text", None)
+                if text and text.strip():
+                    return text.strip()
+                raise Exception("Gemini boş cevap döndü.")
+            except Exception as e:
+                last_error = e
+                print(f"Gemini denemesi başarısız ({model_name}): {e}")
+                time.sleep(3 * attempt)
 
-    raise Exception(f"Gemini başarısız oldu: {last_error}")
+    raise Exception(f"Gemini tüm denemelerde başarısız oldu: {last_error}")
 
 
 def groq_text():
@@ -186,20 +189,27 @@ Kurallar:
 * Sadece paylaşım metnini döndür.
 """
 
-    print("Groq API çağrısı yapılıyor...")
-    result = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.8,
-        max_tokens=300
-    )
+    # Groq tarafında aktif ve geçerli modeller
+    groq_models = ["llama-3.3-70b-versatile", "llama3-8b-8192"]
+    
+    for model_name in groq_models:
+        try:
+            print(f"Groq API çağrısı yapılıyor (Model: {model_name})...")
+            result = groq_client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.8,
+                max_tokens=300
+            )
 
-    if result and result.choices and result.choices[0].message:
-        text = result.choices[0].message.content
-        if text and text.strip():
-            return text.strip()
+            if result and result.choices and result.choices[0].message:
+                text = result.choices[0].message.content
+                if text and text.strip():
+                    return text.strip()
+        except Exception as e:
+            print(f"Groq model denemesi başarısız ({model_name}): {e}")
 
-    raise Exception("Groq boş cevap verdi.")
+    raise Exception("Groq tüm modellerde başarısız oldu veya boş cevap verdi.")
 
 
 def create_post():
@@ -209,7 +219,7 @@ def create_post():
         print("✅ Gemini başarılı.")
         return text, "Gemini"
     except Exception as e:
-        print("⚠️️ Gemini başarısız:", e)
+        print("⚠️ Gemini başarısız:", e)
 
     print("Groq yedek olarak deneniyor...")
     try:
@@ -242,7 +252,7 @@ async def main():
         await login_x()
         print("🚀 X'e gönderiliyor...")
         tweet = await client.create_tweet(text=text)
-        
+
         tweet_id = getattr(tweet, "id", None)
         post_url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else "X Linki Alınamadı"
 
