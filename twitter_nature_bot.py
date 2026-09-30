@@ -1,4 +1,3 @@
-```python
 import os
 import sys
 import time
@@ -50,7 +49,6 @@ Kurallar:
 - Sonuna 2 veya 3 uygun hashtag ekle.
 - Emoji kullanabilirsin.
 - Sadece paylaşım metnini döndür.
-"""
 
     last_error = None
 
