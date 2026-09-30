@@ -1,6 +1,5 @@
+twikit
 google-genai
 groq
 requests
-gTTS
-tweepy
-twikit>=2.3.0
+beautifulsoup4
