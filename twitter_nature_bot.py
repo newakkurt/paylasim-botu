@@ -17,13 +17,14 @@ def send_telegram(message):
         print("Telegram bilgileri yok.")
         return
 
-    url = f"[https://api.telegram.org/bot](https://api.telegram.org/bot){TELEGRAM_BOT_TOKEN}/sendMessage"
+    # URL formatı temizlendi
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN.strip()}/sendMessage"
 
     try:
         response = requests.post(
             url,
             json={
-                "chat_id": TELEGRAM_CHAT_ID,
+                "chat_id": TELEGRAM_CHAT_ID.strip(),
                 "text": message
             },
             timeout=30
@@ -62,9 +63,9 @@ Kurallar:
         try:
             print("Gemini API çağrısı yapılıyor...")
 
-            # Model ismi güncel ve resmi sürüme ayarlandı
+            # Gemini API'nin hata mesajında belirttiği güncel model ismi kullanıldı
             result = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents=prompt
             )
 
@@ -107,9 +108,9 @@ Kurallar:
 
     print("Groq API çağrısı yapılıyor...")
 
-    # Groq üzerindeki aktif ve performanslı model ismi ayarlandı
+    # Groq üzerindeki aktif desteklenen model kullanıldı
     result = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="llama-3.1-8b-instant",
         messages=[
             {
                 "role": "user",
@@ -161,7 +162,7 @@ def post_x(text):
     if not X_ACCESS_TOKEN:
         raise Exception("X_ACCESS_TOKEN yok.")
 
-    url = "[https://api.x.com/2/tweets](https://api.x.com/2/tweets)"
+    url = "https://api.x.com/2/tweets"
 
     headers = {
         "Authorization": "Bearer " + X_ACCESS_TOKEN,
@@ -218,7 +219,7 @@ def main():
 
         post_id = post_x(text)
 
-        post_url = "[https://x.com/i/web/status/](https://x.com/i/web/status/)" + post_id
+        post_url = "https://x.com/i/web/status/" + post_id
 
         print("X paylaşımı başarılı.")
         print("Post ID:", post_id)
