@@ -1,25 +1,63 @@
+import asyncio
+import json
 import os
+import re
 import sys
 import time
 import requests
+
+# --- TWIKIT KEY_BYTE DÜZELTME YAMASI (MONKEY PATCH) ---
+try:
+    import twikit.x_client_transaction.transaction as tx
+
+    _orig_get_indices = tx.ClientTransaction.get_indices
+
+    async def _patched_get_indices(self, response_text, *args, **kwargs):
+        try:
+            return await _orig_get_indices(self, response_text, *args, **kwargs)
+        except Exception:
+            row_index_match = re.search(r'\((\d+)\)', response_text)
+            key_bytes_match = re.search(r'\[([\d,\s]+)\]', response_text)
+            if row_index_match and key_bytes_match:
+                row_index = int(row_index_match.group(1))
+                key_bytes = [int(x.strip()) for x in key_bytes_match.group(1).split(',')]
+                return row_index, key_bytes
+            raise Exception("Couldn't get KEY_BYTE indices via patch")
+
+    tx.ClientTransaction.get_indices = _patched_get_indices
+
+    tx.ON_DEMAND_FILE_REGEX = re.compile(
+        r'https://abs\.twimg\.com/responsive-web/client-web/ondemand\.s\.[a-z0-9]+a\.js'
+    )
+except Exception as e:
+    print(f"⚠️ Twikit patch uygulanamadı: {e}")
+# ------------------------------------------------------
+
+from twikit import Client
 from google import genai
 from groq import Groq
+
+# ORTAM DEĞİŞKENLERİ
+X_USERNAME = os.environ.get("X_USERNAME")
+X_EMAIL = os.environ.get("X_EMAIL")
+X_PASSWORD = os.environ.get("X_PASSWORD")
+X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-X_ACCESS_TOKEN = os.environ.get("X_ACCESS_TOKEN")
+
+COOKIES_FILE = "cookies.json"
+client = Client("en-US")
 
 
-def send_telegram(message):
+def send_telegram(message: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram bilgileri yok.")
+        print("Telegram bilgileri eksik, bildirim atlanıyor.")
         return
 
-    # URL formatı temizlendi
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN.strip()}/sendMessage"
-
     try:
         response = requests.post(
             url,
@@ -29,22 +67,75 @@ def send_telegram(message):
             },
             timeout=30
         )
-
         if response.ok:
-            print("Telegram bildirimi gönderildi.")
+            print("✅ Telegram bildirimi gönderildi.")
         else:
-            print("Telegram HTTP hatası:", response.status_code)
-
+            print("⚠️ Telegram HTTP hatası:", response.status_code)
     except Exception as e:
-        print("Telegram hatası:", e)
+        print("⚠️ Telegram hatası:", e)
+
+
+async def login_x():
+    print("🔑 X oturumu açılıyor...")
+    
+    # 1. Environment'tan COOKIE okuma
+    if X_COOKIES_JSON and X_COOKIES_JSON.strip():
+        try:
+            raw_cookies = json.loads(X_COOKIES_JSON.strip())
+            if isinstance(raw_cookies, list):
+                cookies_dict = {
+                    cookie["name"]: cookie["value"]
+                    for cookie in raw_cookies
+                    if "name" in cookie and "value" in cookie
+                }
+            else:
+                cookies_dict = raw_cookies
+
+            client.set_cookies(cookies_dict)
+            print("✅ X_COOKIES_JSON ortam değişkeninden oturum yüklendi.")
+            return
+        except Exception as e:
+            print(f"⚠️ Ortam değişkeni çerez okuma hatası: {e}")
+
+    # 2. Dosyadan COOKIE okuma
+    if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
+        try:
+            with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+                raw_cookies = json.load(f)
+                if isinstance(raw_cookies, list):
+                    cookies_dict = {
+                        cookie["name"]: cookie["value"]
+                        for cookie in raw_cookies
+                        if "name" in cookie and "value" in cookie
+                    }
+                else:
+                    cookies_dict = raw_cookies
+
+            client.set_cookies(cookies_dict)
+            print("✅ 'cookies.json' dosyasından oturum yüklendi.")
+            return
+        except Exception as e:
+            print(f"⚠️ Çerez dosyası okuma hatası: {e}")
+
+    # 3. Kullanıcı adı ve şifre ile doğrudan giriş
+    if X_USERNAME and X_PASSWORD:
+        print("⚠️️ Çerez bulunamadı, kullanıcı adı/şifre ile giriş yapılıyor...")
+        await client.login(
+            auth_info_1=X_USERNAME,
+            auth_info_2=X_EMAIL,
+            password=X_PASSWORD
+        )
+        print("✅ X girişi başarılı.")
+        return
+
+    raise Exception("X girişi için ne COOKIE ne de X_USERNAME/X_PASSWORD bulundu!")
 
 
 def gemini_text():
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY yok.")
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
+    ai_client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = """
 Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
 
@@ -58,42 +149,31 @@ Kurallar:
 """
 
     last_error = None
-
-    for attempt in range(2):
+    for attempt in range(1, 3):
         try:
-            print("Gemini API çağrısı yapılıyor...")
-
-            # Gemini API'nin hata mesajında belirttiği güncel model ismi kullanıldı
-            result = client.models.generate_content(
+            print(f"Gemini API çağrısı yapılıyor (Deneme {attempt})...")
+            result = ai_client.models.generate_content(
                 model="gemini-3.8-flash",
                 contents=prompt
             )
-
             text = getattr(result, "text", None)
-
-            if text:
-                text = text.strip()
-                return text
-
-            raise Exception("Gemini boş cevap verdi.")
-
+            if text and text.strip():
+                return text.strip()
+            raise Exception("Gemini boş cevap döndü.")
         except Exception as e:
             last_error = e
-            print("Gemini denemesi başarısız:", e)
-
-            if attempt == 0:
-                print("Gemini 5 saniye sonra tekrar denenecek...")
+            print(f"Gemini denemesi başarısız: {e}")
+            if attempt == 1:
                 time.sleep(5)
 
-    raise Exception("Gemini başarısız: " + str(last_error))
+    raise Exception(f"Gemini başarısız oldu: {last_error}")
 
 
 def groq_text():
     if not GROQ_API_KEY:
         raise Exception("GROQ_API_KEY yok.")
 
-    client = Groq(api_key=GROQ_API_KEY)
-
+    groq_client = Groq(api_key=GROQ_API_KEY)
     prompt = """
 Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
 
@@ -107,154 +187,91 @@ Kurallar:
 """
 
     print("Groq API çağrısı yapılıyor...")
-
-    # Groq üzerindeki aktif desteklenen model kullanıldı
-    result = client.chat.completions.create(
+    result = groq_client.chat.completions.create(
         model="llama-3.1-8b-instant",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.8,
         max_tokens=300
     )
 
-    if not result or not result.choices:
-        raise Exception("Groq cevap nesnesi veya choices boş.")
+    if result and result.choices and result.choices[0].message:
+        text = result.choices[0].message.content
+        if text and text.strip():
+            return text.strip()
 
-    message = result.choices[0].message
-
-    if not message or not message.content:
-        raise Exception("Groq mesaj içeriği boş.")
-
-    text = message.content.strip()
-
-    if not text:
-        raise Exception("Groq boş cevap verdi.")
-
-    return text
+    raise Exception("Groq boş cevap verdi.")
 
 
 def create_post():
     print("Gemini deneniyor...")
-
     try:
         text = gemini_text()
-        print("Gemini başarılı.")
+        print("✅ Gemini başarılı.")
         return text, "Gemini"
     except Exception as e:
-        print("Gemini başarısız:", e)
+        print("⚠️️ Gemini başarısız:", e)
 
     print("Groq yedek olarak deneniyor...")
-
     try:
         text = groq_text()
-        print("Groq başarılı.")
+        print("✅ Groq başarılı.")
         return text, "Groq"
     except Exception as e:
-        print("Groq başarısız:", e)
+        print("⚠️ Groq başarısız:", e)
         raise Exception("Hem Gemini hem Groq başarısız oldu.")
 
 
-def post_x(text):
-    if not X_ACCESS_TOKEN:
-        raise Exception("X_ACCESS_TOKEN yok.")
-
-    url = "https://api.x.com/2/tweets"
-
-    headers = {
-        "Authorization": "Bearer " + X_ACCESS_TOKEN,
-        "Content-Type": "application/json"
-    }
-
-    print("X API'ye gönderiliyor...")
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json={"text": text},
-        timeout=30
-    )
-
-    print("X API HTTP:", response.status_code)
-
-    if not response.ok:
-        print("X API cevabı:", response.text)
-        raise Exception(f"X paylaşımı başarısız. HTTP {response.status_code}")
-
-    data = response.json()
-
-    if "data" not in data or "id" not in data["data"]:
-        print("X API beklenmeyen cevap:", data)
-        raise Exception("X API veri formatı geçersiz.")
-
-    return data["data"]["id"]
-
-
-def main():
+async def main():
     print("=" * 60)
     print("DOGA ICERIK BOTU")
     print("=" * 60)
 
     try:
+        # 1. İçerik üret
         text, model = create_post()
-
         text = text.replace("\n", " ").strip()
 
         if len(text) > 200:
             text = text[:197] + "..."
 
-        print()
-        print("KULLANILAN MODEL:", model)
-        print()
-        print("OLUSTURULAN PAYLASIM:")
-        print(text)
-        print()
-        print("Karakter sayisi:", len(text))
+        print(f"\nKULLANILAN MODEL: {model}")
+        print(f"OLUSTURULAN PAYLASIM:\n{text}")
+        print(f"Karakter sayısı: {len(text)}\n")
 
-        print()
-        print("X'e gönderiliyor...")
+        # 2. X Login & Tweet Gönderme
+        await login_x()
+        print("🚀 X'e gönderiliyor...")
+        tweet = await client.create_tweet(text=text)
+        
+        tweet_id = getattr(tweet, "id", None)
+        post_url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else "X Linki Alınamadı"
 
-        post_id = post_x(text)
+        print("✅ X paylaşımı başarılı.")
+        print("Post ID:", tweet_id)
 
-        post_url = "https://x.com/i/web/status/" + post_id
-
-        print("X paylaşımı başarılı.")
-        print("Post ID:", post_id)
-        print("Post URL:", post_url)
-
+        # 3. Telegram Bildirimi
         telegram_message = (
-            "DOGA ICERIK BOTU BASARILI\n\n"
-            "Model: " + model + "\n"
-            "Paylasim:\n" + text + "\n\n"
-            "X:\n" + post_url
+            "✅ **DOGA ICERIK BOTU BASARILI**\n\n"
+            f"**Model:** {model}\n"
+            f"**Paylaşım:**\n{text}\n\n"
+            f"**Link:** {post_url}"
         )
-
         send_telegram(telegram_message)
 
-        print()
-        print("=" * 60)
+        print("\n" + "=" * 60)
         print("PROGRAM BASARIYLA TAMAMLANDI.")
         print("=" * 60)
-
         return 0
 
     except Exception as e:
-        print()
-        print("=" * 60)
+        print("\n" + "=" * 60)
         print("PROGRAM HATASI")
         print("=" * 60)
         print(e)
 
-        send_telegram(
-            "DOGA ICERIK BOTU HATA VERDI\n\n"
-            + str(e)
-        )
-
+        send_telegram(f"❌ **DOGA ICERIK BOTU HATA VERDI**\n\n{e}")
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))
