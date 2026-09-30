@@ -11,3 +11,5 @@ requests
 git+https://github.com/d60/twikit.git
 
 twikit>=2.2.0
+
+git+https://github.com/unclecode/twikit.git
