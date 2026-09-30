@@ -96,7 +96,6 @@ Kurallar:
 - Sonuna 2 veya 3 uygun hashtag ekle.
 - Emoji kullanabilirsin.
 - Sadece paylaşım metnini döndür.
-"""
 
     result = client.chat.completions.create(
         model="openai/gpt-oss-20b",
