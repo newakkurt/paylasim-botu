@@ -198,6 +198,8 @@ def groq_text():
     
     groq_models = [
         "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-specdec",
         "llama3-70b-8192",
         "gemma2-9b-it",
         "mixtral-8x7b-32768"
