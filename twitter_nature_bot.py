@@ -155,14 +155,15 @@ async def login_x():
     raise Exception("X girişi için ne COOKIE ne de X_USERNAME/X_PASSWORD bulundu!")
 
 
-# --- GEMINI (BİREBİR AYNI BIRAKILDI) ---
 def gemini_text():
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY yok.")
 
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
     last_error = None
-    models_to_try = ["gemini-3.8-flash"]
+    
+    # Kotalı model yerine güncel ve alternatif Gemini modelleri
+    models_to_try = ["gemini-3.8-flash","gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
     config = types.GenerateContentConfig(
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
@@ -189,20 +190,19 @@ def gemini_text():
     raise Exception(f"Gemini tüm denemelerde başarısız oldu: {last_error}")
 
 
-# --- GROQ (BİREBİR AYNI BIRAKILDI) ---
 def groq_text():
     if not GROQ_API_KEY:
         raise Exception("GROQ_API_KEY yok.")
 
     groq_client = Groq(api_key=GROQ_API_KEY)
     
+    # Groq tarafında güncel ve aktifi yüksek modeller
     groq_models = [
         "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-specdec",
         "llama3-70b-8192",
-        "gemma2-9b-it",
-        "mixtral-8x7b-32768"
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it"
     ]
 
     for model_name in groq_models:
