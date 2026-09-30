@@ -190,7 +190,7 @@ Kurallar:
 """
 
     # Groq tarafında aktif ve geçerli modeller
-    groq_models = ["llama-3.3-70b-specdec", "llama-3.1-8b-instant"]
+    groq_models = ["llama-3.3-70b-versatile", "llama3-70b-8192"]
     
     for model_name in groq_models:
         try:
