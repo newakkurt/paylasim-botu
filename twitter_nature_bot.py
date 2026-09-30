@@ -48,6 +48,10 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
+YOUTUBE_CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID")
+YOUTUBE_CHANNEL_URL = os.environ.get("YOUTUBE_CHANNEL_URL", "")
+
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -59,34 +63,96 @@ Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
 
 Kurallar:
 * 1 veya 2 cümle olsun.
-* Maksimum 200 karakter olsun.
+* Maksimum 160 karakter olsun.
 * Gerçek ve doğrulanabilir bir bilgi olsun.
-* Sonuna 2 veya 3 uygun hashtag ekle.
+* Sonuna 1 veya 2 uygun hashtag ekle.
 * Emoji kullanabilirsin.
 * Sadece paylaşım metnini döndür.
 """
 
-def send_telegram(message: str):
+def get_latest_youtube_data():
+    """
+    YouTube Data API v3 üzerinden son videonun başlığını, linkini ve kapak resmini alır.
+    """
+    if not YOUTUBE_API_KEY or not YOUTUBE_CHANNEL_ID:
+        print("⚠️ YouTube API Key veya Channel ID tanımlı değil.")
+        return None
+
+    try:
+        url = (
+            f"https://www.googleapis.com/youtube/v3/search?"
+            f"key={YOUTUBE_API_KEY.strip()}&channelId={YOUTUBE_CHANNEL_ID.strip()}"
+            f"&part=snippet,id&order=date&maxResults=1&type=video"
+        )
+        res = requests.get(url, timeout=15)
+        if res.ok:
+            data = res.json()
+            items = data.get("items", [])
+            if items:
+                video_id = items[0].get("id", {}).get("videoId")
+                snippet = items[0].get("snippet", {})
+                title = snippet.get("title", "")
+                
+                # Kapak resmi URL'si
+                thumbnails = snippet.get("thumbnails", {})
+                image_url = (
+                    thumbnails.get("high", {}).get("url") or 
+                    thumbnails.get("medium", {}).get("url") or 
+                    thumbnails.get("default", {}).get("url")
+                )
+
+                if video_id:
+                    return {
+                        "video_url": f"https://youtu.be/{video_id}",
+                        "title": title,
+                        "image_url": image_url
+                    }
+    except Exception as e:
+        print(f"⚠️ YouTube API veri çekme hatası: {e}")
+    
+    return None
+
+
+def send_telegram(message: str, image_url: str = None):
+    """
+    Telegram'a mesaj ve varsa kapak resmi/görsel gönderir.
+    """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram bilgileri eksik, bildirim atlanıyor.")
         return
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN.strip()}/sendMessage"
+    token = TELEGRAM_BOT_TOKEN.strip()
+    chat_id = TELEGRAM_CHAT_ID.strip()
+
     try:
-        response = requests.post(
-            url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID.strip(),
-                "text": message
-            },
-            timeout=30
-        )
-        if response.ok:
-            print("✅ Telegram bildirimi gönderildi.")
+        # Eğer video kapak resmi varsa fotoğraflı bildirim at
+        if image_url:
+            photo_url = f"https://api.telegram.org/bot{token}/sendPhoto"
+            requests.post(
+                photo_url,
+                json={
+                    "chat_id": chat_id,
+                    "photo": image_url,
+                    "caption": message,
+                    "parse_mode": "Markdown"
+                },
+                timeout=30
+            )
+            print("✅ Telegram fotoğraflı bildirimi gönderildi.")
         else:
-            print("⚠️ Telegram HTTP hatası:", response.status_code)
+            msg_url = f"https://api.telegram.org/bot{token}/sendMessage"
+            requests.post(
+                msg_url,
+                json={
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown"
+                },
+                timeout=30
+            )
+            print("✅ Telegram mesaj bildirimi gönderildi.")
     except Exception as e:
-        print("⚠️ Telegram hatası:", e)
+        print("⚠️ Telegram bildirim hatası:", e)
 
 
 async def login_x():
@@ -162,15 +228,14 @@ def gemini_text():
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
     last_error = None
     
-    # Kotalı model yerine güncel ve alternatif Gemini modelleri
-    models_to_try = ["gemini-3.8-flash","gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    models_to_try = ["gemini-3.8-flash", "gemini-3.8-pro"]
 
     config = types.GenerateContentConfig(
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
     )
 
     for model_name in models_to_try:
-        for attempt in range(1, 3):
+        for attempt in range(1, 4):
             try:
                 print(f"Gemini API çağrısı yapılıyor (Model: {model_name}, Deneme: {attempt})...")
                 result = ai_client.models.generate_content(
@@ -184,8 +249,15 @@ def gemini_text():
                 raise Exception("Gemini boş cevap döndü.")
             except Exception as e:
                 last_error = e
-                print(f"Gemini denemesi başarısız ({model_name}): {e}")
-                time.sleep(2)
+                err_msg = str(e)
+                print(f"Gemini denemesi başarısız ({model_name}): {err_msg}")
+                
+                if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg:
+                    wait_time = 15 * attempt
+                    print(f"⏳ Kota/Yoğunluk hatası alındı. {wait_time} saniye bekleniyor...")
+                    time.sleep(wait_time)
+                else:
+                    time.sleep(2)
 
     raise Exception(f"Gemini tüm denemelerde başarısız oldu: {last_error}")
 
@@ -196,13 +268,11 @@ def groq_text():
 
     groq_client = Groq(api_key=GROQ_API_KEY)
     
-    # Groq tarafında güncel ve aktifi yüksek modeller
     groq_models = [
         "llama-3.3-70b-versatile",
-        "llama3-70b-8192",
         "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768",
-        "gemma2-9b-it"
+        "llama3-70b-8192"
+        
     ]
 
     for model_name in groq_models:
@@ -292,14 +362,14 @@ def create_post():
         print("✅ OpenRouter başarılı.")
         return text, "OpenRouter"
     except Exception as e:
-        print("⚠️ OpenRouter başarısız:", e)
+        print("⚠️️ OpenRouter başarısız:", e)
 
     raise Exception("Tüm yapay zeka servisleri (Gemini, Groq, OpenRouter) başarısız oldu.")
 
 
 async def main():
     print("=" * 60)
-    print("DOGA ICERIK BOTU")
+    print("DOGA ICERIK BOTU (YOUTUBE & TELEGRAM GÖRSEL ENTEGRASYONLU)")
     print("=" * 60)
 
     try:
@@ -307,14 +377,26 @@ async def main():
         text, model = create_post()
         text = str(text).replace("\n", " ").strip()
 
-        if len(text) > 200:
-            text = text[:197] + "..."
+        # 2. YouTube Verisi Çek ve Metne Ekle
+        yt_data = get_latest_youtube_data()
+        image_url = None
+
+        if yt_data:
+            image_url = yt_data.get("image_url")
+            video_url = yt_data.get("video_url")
+            text += f"\n\n📺 Son Videomuzu İzleyin:\n{video_url}\n🔔 Kanalımıza abone olmayı unutmayın!"
+        elif YOUTUBE_CHANNEL_URL:
+            text += f"\n\n📺 YouTube Kanalımız:\n{YOUTUBE_CHANNEL_URL.strip()}\n🔔 Daha fazlası için takip edin!"
+
+        # X Karakter Sınırı Kontrolü (280 Karakter)
+        if len(text) > 275:
+            text = text[:272] + "..."
 
         print(f"\nKULLANILAN MODEL: {model}")
         print(f"OLUSTURULAN PAYLASIM:\n{text}")
         print(f"Karakter sayısı: {len(text)}\n")
 
-        # 2. X Login & Tweet Gönderme
+        # 3. X Login & Tweet Gönderme
         await login_x()
         print("🚀 X'e gönderiliyor...")
         tweet = await client.create_tweet(text=str(text))
@@ -325,14 +407,15 @@ async def main():
         print("✅ X paylaşımı başarılı.")
         print("Post ID:", tweet_id)
 
-        # 3. Telegram Bildirimi
+        # 4. Telegram Bildirimi (Görsel ve Takip Çağrılı)
         telegram_message = (
-            "✅ **DOGA ICERIK BOTU BASARILI**\n\n"
-            f"**Model:** {model}\n"
-            f"**Paylaşım:**\n{text}\n\n"
-            f"**Link:** {post_url}"
+            "✅ *DOGA ICERIK BOTU BASARILI*\n\n"
+            f"*Model:* {model}\n\n"
+            f"*Paylaşım:* \n{text}\n\n"
+            f"🔗 [X Paylaşımına Git]({post_url})"
         )
-        send_telegram(telegram_message)
+        
+        send_telegram(telegram_message, image_url=image_url)
 
         print("\n" + "=" * 60)
         print("PROGRAM BASARIYLA TAMAMLANDI.")
@@ -345,7 +428,7 @@ async def main():
         print("=" * 60)
         print(e)
 
-        send_telegram(f"❌ **DOGA ICERIK BOTU HATA VERDI**\n\n{e}")
+        send_telegram(f"❌ *DOGA ICERIK BOTU HATA VERDI*\n\n`{e}`")
         return 1
 
 
