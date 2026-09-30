@@ -1,20 +1,23 @@
 import asyncio
 import json
+import re
 import os
 import sys
 import time
 import requests
 
-# --- TWIKIT KEY_BYTE PATCH (X'in değişen JS yapısını yamalar) ---
+# --- TWIKIT KEY_BYTE DÜZELTME YAMASI (REGEX DOĞRU TİPTE DERLENDİ) ---
 try:
     import twikit.x_client_transaction.transaction as trans
-    trans.ON_DEMAND_FILE_REGEX = r'https://abs\.twimg\.com/responsive-web/client-web/ondemand\.s\.[a-z0-9]+\text{a}\.js'
-except Exception:
-    pass
+    trans.ON_DEMAND_FILE_REGEX = re.compile(
+        r'https://abs\.twimg\.com/responsive-web/client-web/ondemand\.s\.[a-z0-9]+\text{a}\.js'
+    )
+except Exception as e:
+    print(f"⚠️ Twikit patch uygulanamadı: {e}")
 # ------------------------------------------------------------------
 
 from twikit import Client
-import google.generativeai as genai
+from google import genai
 
 try:
     from groq import Groq
@@ -108,18 +111,19 @@ def generate_ai_tweet():
         " EKLEME."
     )
 
-    # 1. Gemini (1.5 Flash)
+    # 1. Gemini (Yeni google-genai SDK ile gemini-2.5-flash)
     if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
         for attempt in range(1, 4):
             try:
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                response = model.generate_content(prompt)
+                ai_client = genai.Client(api_key=GEMINI_API_KEY)
+                response = ai_client.models.generate_content(
+                    model="gemini-2.5-flash", contents=prompt
+                )
                 if response and response.text:
-                    return response.text.strip(), "Gemini 1.5 Flash"
+                    return response.text.strip(), "Gemini 2.5 Flash"
             except Exception as e:
                 print(
-                    f"⚠️️ Gemini deneme {attempt}/3 başarısız ({e}), bekleniyor..."
+                    f"⚠️ Gemini deneme {attempt}/3 başarısız ({e}), bekleniyor..."
                 )
                 time.sleep(2)
 
