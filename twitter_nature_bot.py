@@ -155,7 +155,7 @@ async def login_x():
     raise Exception("X girişi için ne COOKIE ne de X_USERNAME/X_PASSWORD bulundu!")
 
 
-# --- GEMINI (DOKUNULMADI) ---
+# --- GEMINI (BİREBİR AYNI BIRAKILDI) ---
 def gemini_text():
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY yok.")
@@ -189,7 +189,7 @@ def gemini_text():
     raise Exception(f"Gemini tüm denemelerde başarısız oldu: {last_error}")
 
 
-# --- GROQ (DOKUNULMADI) ---
+# --- GROQ (BİREBİR AYNI BIRAKILDI) ---
 def groq_text():
     if not GROQ_API_KEY:
         raise Exception("GROQ_API_KEY yok.")
@@ -227,7 +227,6 @@ def groq_text():
     raise Exception("Groq tüm modellerde başarısız oldu.")
 
 
-# --- OPENROUTER (DÜZELTİLDİ) ---
 def openrouter_text():
     if not OPENROUTER_API_KEY:
         raise Exception("OPENROUTER_API_KEY tanımlı değil.")
@@ -285,8 +284,7 @@ def create_post():
         print("✅ Groq başarılı.")
         return text, "Groq"
     except Exception as e:
-        print("⚠️ Groq başarılı.")
-        return text, "Groq"
+        print("⚠️ Groq başarısız:", e)
 
     print("3. OpenRouter yedek olarak deneniyor...")
     try:
@@ -307,8 +305,6 @@ async def main():
     try:
         # 1. İçerik üret
         text, model = create_post()
-        
-        # Metnin kesinlikle düzgün bir 'str' olmasını ve tek satırda kalmasını sağlıyoruz
         text = str(text).replace("\n", " ").strip()
 
         if len(text) > 200:
@@ -318,10 +314,9 @@ async def main():
         print(f"OLUSTURULAN PAYLASIM:\n{text}")
         print(f"Karakter sayısı: {len(text)}\n")
 
-        # 2. X Login & Tweet Gönderme (Twikit BeautifulSoup hatasına karşı koruma eklendi)
+        # 2. X Login & Tweet Gönderme
         await login_x()
         print("🚀 X'e gönderiliyor...")
-        
         tweet = await client.create_tweet(text=str(text))
 
         tweet_id = getattr(tweet, "id", None)
