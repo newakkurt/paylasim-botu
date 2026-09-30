@@ -6,6 +6,30 @@ import sys
 import time
 import requests
 
+import re
+import twikit.x_client_transaction.transaction as tx
+
+# Twikit'in bozuk indeks alma metodunu yamalıyoruz
+_orig_get_indices = tx.ClientTransaction.get_indices
+
+async def _patched_get_indices(self, response_text):
+    try:
+        return await _orig_get_indices(self, response_text)
+    except Exception:
+        row_index_match = re.search(r'\((\d+)\)', response_text)
+        key_bytes_match = re.search(r'\[([\d,\s]+)\]', response_text)
+        if row_index_match and key_bytes_match:
+            row_index = int(row_index_match.group(1))
+            key_bytes = [int(x.strip()) for x in key_bytes_match.group(1).split(',')]
+            return row_index, key_bytes
+        raise Exception("Couldn't get KEY_BYTE indices via patch")
+
+tx.ClientTransaction.get_indices = _patched_get_indices
+
+# --- BUNDAN SONRA MEVCUT IMPORT VE KODLARINIZ GELSİN ---
+import asyncio
+from twikit import Client
+# ...
 # --- TWIKIT KEY_BYTE DÜZELTME YAMASI (REGEX DOĞRU TİPTE DERLENDİ) ---
 try:
     import twikit.x_client_transaction.transaction as trans
