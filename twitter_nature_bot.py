@@ -16,7 +16,6 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 print("Telegram bilgileri yok.")
 return
 
-```
 url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
 
 try:
