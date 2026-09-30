@@ -45,12 +45,25 @@ X_COOKIES_JSON = os.environ.get("X_COOKIES_JSON")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 COOKIES_FILE = "cookies.json"
 client = Client("en-US")
 
+PROMPT = """
+Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
+
+Kurallar:
+* 1 veya 2 cümle olsun.
+* Maksimum 200 karakter olsun.
+* Gerçek ve doğrulanabilir bir bilgi olsun.
+* Sonuna 2 veya 3 uygun hashtag ekle.
+* Emoji kullanabilirsin.
+* Sadece paylaşım metnini döndür.
+"""
 
 def send_telegram(message: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -136,29 +149,16 @@ def gemini_text():
         raise Exception("GEMINI_API_KEY yok.")
 
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = """
-Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
-
-Kurallar:
-* 1 veya 2 cümle olsun.
-* Maksimum 200 karakter olsun.
-* Gerçek ve doğrulanabilir bir bilgi olsun.
-* Sonuna 2 veya 3 uygun hashtag ekle.
-* Emoji kullanabilirsin.
-* Sadece paylaşım metnini döndür.
-"""
-
     last_error = None
-    # 503 geçici yoğunluk durumları için farklı modeller ve esnek deneme sayısı
-    models_to_try = ["gemini-3.8-flash",]
-    
+    models_to_try = ["gemini-3.8-flash"]
+
     for model_name in models_to_try:
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             try:
                 print(f"Gemini API çağrısı yapılıyor (Model: {model_name}, Deneme: {attempt})...")
                 result = ai_client.models.generate_content(
                     model=model_name,
-                    contents=prompt
+                    contents=PROMPT
                 )
                 text = getattr(result, "text", None)
                 if text and text.strip():
@@ -167,7 +167,7 @@ Kurallar:
             except Exception as e:
                 last_error = e
                 print(f"Gemini denemesi başarısız ({model_name}): {e}")
-                time.sleep(3 * attempt)
+                time.sleep(2)
 
     raise Exception(f"Gemini tüm denemelerde başarısız oldu: {last_error}")
 
@@ -177,27 +177,21 @@ def groq_text():
         raise Exception("GROQ_API_KEY yok.")
 
     groq_client = Groq(api_key=GROQ_API_KEY)
-    prompt = """
-Türkçe, kısa ve ilgi çekici bir doğa bilgisi hazırla.
+    groq_models = []
+    try:
+        models_list = groq_client.models.list()
+        groq_models = [m.id for m in models_list.data if getattr(m, "active", True)]
+        print(f"Groq üzerinde aktif {len(groq_models)} model bulundu.")
+    except Exception as e:
+        print(f"Groq model listesi çekilemedi, varsayılan liste kullanılacak: {e}")
+        groq_models = ["llama3-70b-8192", "gemma2-9b-it", "mixtral-8x7b-32768"]
 
-Kurallar:
-* 1 veya 2 cümle olsun.
-* Maksimum 200 karakter olsun.
-* Gerçek ve doğrulanabilir bir bilgi olsun.
-* Sonuna 2 veya 3 uygun hashtag ekle.
-* Emoji kullanabilirsin.
-* Sadece paylaşım metnini döndür.
-"""
-
-    # Groq tarafında aktif ve geçerli modeller
-    groq_models = ["llama-3.3-70b-versatile", "llama3-70b-8192"]
-    
     for model_name in groq_models:
         try:
             print(f"Groq API çağrısı yapılıyor (Model: {model_name})...")
             result = groq_client.chat.completions.create(
                 model=model_name,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": PROMPT}],
                 temperature=0.8,
                 max_tokens=300
             )
@@ -212,8 +206,50 @@ Kurallar:
     raise Exception("Groq tüm modellerde başarısız oldu veya boş cevap verdi.")
 
 
+def openrouter_text():
+    if not OPENROUTER_API_KEY:
+        raise Exception("OPENROUTER_API_KEY tanımlı değil.")
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
+        "Content-Type": "application/json"
+    }
+
+    free_models = [
+        "google/gemma-2-9b-it:free",
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free",
+        "mistralai/mistral-7b-instruct:free"
+    ]
+
+    for model in free_models:
+        try:
+            print(f"OpenRouter API çağrısı yapılıyor (Model: {model})...")
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": PROMPT}],
+                    "max_tokens": 300
+                },
+                timeout=30
+            )
+            if response.ok:
+                data = response.json()
+                text = data["choices"][0]["message"]["content"]
+                if text and text.strip():
+                    return text.strip()
+            else:
+                print(f"OpenRouter HTTP Hatası ({model}): {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"OpenRouter denemesi başarısız ({model}): {e}")
+
+    raise Exception("OpenRouter tüm modellerde başarısız oldu.")
+
+
 def create_post():
-    print("Gemini deneniyor...")
+    print("1. Gemini deneniyor...")
     try:
         text = gemini_text()
         print("✅ Gemini başarılı.")
@@ -221,14 +257,23 @@ def create_post():
     except Exception as e:
         print("⚠️ Gemini başarısız:", e)
 
-    print("Groq yedek olarak deneniyor...")
+    print("2. Groq yedek olarak deneniyor...")
     try:
         text = groq_text()
         print("✅ Groq başarılı.")
         return text, "Groq"
     except Exception as e:
         print("⚠️ Groq başarısız:", e)
-        raise Exception("Hem Gemini hem Groq başarısız oldu.")
+
+    print("3. OpenRouter yedek olarak deneniyor...")
+    try:
+        text = openrouter_text()
+        print("✅ OpenRouter başarılı.")
+        return text, "OpenRouter"
+    except Exception as e:
+        print("⚠️ OpenRouter başarısız:", e)
+
+    raise Exception("Tüm yapay zeka servisleri (Gemini, Groq, OpenRouter) başarısız oldu.")
 
 
 async def main():
