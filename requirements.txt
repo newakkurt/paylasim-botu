@@ -4,3 +4,8 @@ gTTS>=2.5.0
 tweepy
 twikit
 groq
+
+google-generativeai
+groq
+requests
+git+https://github.com/d60/twikit.git
