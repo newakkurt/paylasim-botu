@@ -1,4 +1,3 @@
-```python
 import os
 import sys
 import time
@@ -7,15 +6,10 @@ import requests
 from google import genai
 
 try:
-    from groq import Groq
-    GROQ_AVAILABLE = True
+from groq import Groq
+GROQ_AVAILABLE = True
 except ImportError:
-    GROQ_AVAILABLE = False
-
-
-# ============================================================
-# AYARLAR
-# ============================================================
+GROQ_AVAILABLE = False
 
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -25,265 +19,225 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-
-# ============================================================
-# TELEGRAM
-# ============================================================
-
 def send_telegram_log(message: str):
+"""Telegram'a mesaj gönderir."""
 
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("ℹ️ Telegram bilgileri bulunamadı.")
-        return
+```
+if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    print("⚠️ Telegram bilgileri bulunamadı.")
+    return
 
-    try:
-        url = (
-            "https://api.telegram.org/"
-            f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+url = (
+    f"https://api.telegram.org/bot"
+    f"{TELEGRAM_BOT_TOKEN}/sendMessage"
+)
+
+payload = {
+    "chat_id": TELEGRAM_CHAT_ID,
+    "text": message
+}
+
+try:
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=20
+    )
+
+    if response.ok:
+        print("✅ Telegram bildirimi gönderildi.")
+    else:
+        print(
+            f"⚠️ Telegram hatası: "
+            f"{response.status_code} {response.text}"
         )
 
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "Markdown",
-        }
-
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=10
-        )
-
-        if not response.ok:
-            print(
-                "⚠️ Telegram gönderim hatası: "
-                f"{response.text}"
-            )
-
-    except Exception as e:
-        print(f"⚠️ Telegram log hatası: {e}")
-
-
-# ============================================================
-# AI TWEET ÜRETİMİ
-# ============================================================
+except Exception as e:
+    print(f"⚠️ Telegram bağlantı hatası: {e}")
+```
 
 def generate_ai_tweet():
+"""Gemini ile doğa içerikli kısa paylaşım üretir."""
 
-    prompt = """
-Sen doğa, okyanus, canlılar dünyası ve çevre
-hakkında büyüleyici bilgiler paylaşan uzman
-bir içerik üreticisisin.
+```
+prompt = """
+```
 
-Takipçilerin ilgisini çekecek, samimi ve merak
-uyandırıcı 1 adet Türkçe X gönderisi yaz.
+Sen Türkçe içerik üreten bir doğa ve bilim içerik editörüsün.
+
+Twitter/X için kısa, ilgi çekici ve bilgi verici bir doğa paylaşımı hazırla.
 
 Kurallar:
 
-- İçerik tamamen doğa, deniz canlıları,
-  hayvanlar veya ekosistem ile ilgili olsun.
-- Maksimum 200 karakter olsun.
-- En fazla 3 alakalı hashtag kullan.
-- Türkçe yaz.
-- Sadece gönderinin kendisini yaz.
-- "Üretici:", "Bot:", "Sabit Havuz"
-  gibi ifadeler kullanma.
-- Kaynak veya dipnot ekleme.
-"""
+* Türkçe yaz.
+* Maksimum 200 karakter olsun.
+* Doğa, hayvanlar, bitkiler, okyanuslar, uzay veya çevre konularından birini seç.
+* İlginç ve mümkün olduğunca doğrulanabilir bir bilgi kullan.
+* Abartılı veya uydurma bilgi verme.
+* En fazla 3 hashtag kullan.
+* Emoji kullanabilirsin.
+* Giriş cümlesi dikkat çekici olsun.
+* Sadece paylaşım metnini döndür.
+* Açıklama yapma.
+* Tırnak işareti kullanma.
+  """
 
-    # ========================================================
-    # GEMINI
-    # ========================================================
+  # ---------------------------------------------------------
 
-    if GEMINI_API_KEY:
+  # 1. GEMINI
 
-        for attempt in range(1, 4):
+  # ---------------------------------------------------------
 
-            try:
+  if GEMINI_API_KEY:
+  try:
+  print("🤖 Gemini ile içerik üretiliyor...")
 
-                print(
-                    f"🤖 Gemini deneniyor ({attempt}/3)..."
-                )
-
-                ai_client = genai.Client(
-                    api_key=GEMINI_API_KEY
-                )
-
-                response = ai_client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt
-                )
-
-                if response and response.text:
-
-                    tweet = response.text.strip()
-
-                    tweet = tweet.strip("\"'")
-
-                    if len(tweet) <= 200:
-                        return (
-                            tweet,
-                            "Gemini 2.5 Flash"
-                        )
-
-                    print(
-                        "⚠️ Gemini 200 karakterden uzun içerik üretti."
-                    )
-
-            except Exception as e:
-
-                print(
-                    f"⚠️ Gemini deneme {attempt}/3 başarısız: {e}"
-                )
-
-                time.sleep(2)
-
-
-    # ========================================================
-    # GROQ
-    # ========================================================
-
-    if GROQ_API_KEY and GROQ_AVAILABLE:
-
-        try:
-
-            print("🤖 Groq deneniyor...")
-
-            groq_client = Groq(
-                api_key=GROQ_API_KEY
-            )
-
-            completion = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=150
-            )
-
-            content = (
-                completion
-                .choices[0]
-                .message
-                .content
-            )
-
-            if content:
-
-                tweet = content.strip()
-
-                tweet = tweet.strip("\"'")
-
-                if len(tweet) <= 200:
-                    return (
-                        tweet,
-                        "Groq (Llama-3.3-70b)"
-                    )
-
-                print(
-                    "⚠️ Groq 200 karakterden uzun içerik üretti."
-                )
-
-        except Exception as e:
-
-            print(
-                f"⚠️ Groq tweet üretimi başarısız: {e}"
-            )
-
-
-    raise Exception(
-        "❌ Hiçbir yapay zeka servisi içerik üretemedi!"
-    )
-
-
-# ============================================================
-# TWEET HAZIRLA
-# ============================================================
-
-def prepare_daily_tweet():
-
-    tweet_text, ai_model = generate_ai_tweet()
-
-    print("\n📝 Tweet hazırlandı:")
-    print(f"🤖 AI: {ai_model}")
-    print(f"📝 Tweet:\n{tweet_text}")
-    print(f"📏 Karakter: {len(tweet_text)}")
-
-    return tweet_text, ai_model
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-if __name__ == "__main__":
-
-    try:
-
-        print(
-            "🌿 Doğa içerik botu başlatılıyor..."
+  ```
+        client = genai.Client(
+            api_key=GEMINI_API_KEY
         )
 
-        tweet_text, ai_model = prepare_daily_tweet()
-
-        print("\n⚠️ Twikit kaldırıldı.")
-
-        print(
-            "ℹ️ Tweet oluşturuldu ancak "
-            "X üzerinde otomatik paylaşılmadı."
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
         )
 
-        telegram_msg = (
-            "📝 *Yeni Doğa Tweeti Hazırlandı!*\n\n"
-            f"*İçerik:*\n{tweet_text}\n\n"
-            f"🤖 *AI:* `{ai_model}`\n\n"
-            "ℹ️ Twikit kaldırıldığı için "
-            "X paylaşımı yapılmadı."
-        )
+        text = (response.text or "").strip()
 
-        send_telegram_log(telegram_msg)
+        if text:
+            text = text.replace("\n", " ").strip()
+
+            if len(text) > 200:
+                text = text[:197] + "..."
+
+            print("✅ Gemini içerik üretti.")
+
+            return text, "Gemini"
 
     except Exception as e:
+        print(f"⚠️ Gemini başarısız: {e}")
+        print("🔄 Groq yedek modele geçiliyor...")
+  ```
 
-        print("\n❌ PROGRAM HATASI:")
-        print(str(e))
+  # ---------------------------------------------------------
 
-        send_telegram_log(
-            "❌ *Bot hata verdi:*\n\n"
-            f"`{str(e)}`"
+  # 2. GROQ YEDEK
+
+  # ---------------------------------------------------------
+
+  if GROQ_API_KEY and GROQ_AVAILABLE:
+  try:
+  print("🤖 Groq ile içerik üretiliyor...")
+
+  ```
+        groq_client = Groq(
+            api_key=GROQ_API_KEY
         )
 
-        sys.exit(1)
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.8,
+            max_tokens=150
+        )
+
+        text = (
+            response.choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        if text:
+            text = text.replace("\n", " ").strip()
+
+            if len(text) > 200:
+                text = text[:197] + "..."
+
+            print("✅ Groq içerik üretti.")
+
+            return text, "Groq"
+
+    except Exception as e:
+        print(f"❌ Groq başarısız: {e}")
+  ```
+
+  raise Exception(
+  "Gemini veya Groq ile içerik üretilemedi."
+  )
+
+def prepare_daily_tweet():
+"""Günün paylaşımını hazırlar."""
+
+```
+print("=" * 60)
+print("🌿 DOĞA İÇERİK BOTU")
+print("=" * 60)
+
+tweet_text, ai_model = generate_ai_tweet()
+
+print()
+print("📝 OLUŞTURULAN PAYLAŞIM:")
+print("-" * 60)
+print(tweet_text)
+print("-" * 60)
+print(f"🤖 Model: {ai_model}")
+print(f"📏 Karakter sayısı: {len(tweet_text)}")
+
+return tweet_text, ai_model
 ```
 
-**Çok önemli:** Kod bloğunun başındaki ve sonundaki
-
-```text
-```
+def main():
+"""Ana program."""
 
 ```
+try:
+    print("🚀 Bot başlatılıyor...")
+    print()
 
-işaretlerini `.py` dosyasına **koyma**. Sadece kodun kendisini koy.
+    tweet_text, ai_model = prepare_daily_tweet()
 
-Sonra GitHub'da **Commit changes** yap.
+    print()
+    print("⚠️ Twikit tamamen kaldırıldı.")
+    print("ℹ️ X otomatik paylaşımı şu anda yapılmıyor.")
+    print("✅ İçerik başarıyla oluşturuldu.")
 
-### Fakat bir sonraki sorun da var
+    telegram_message = (
+        "🌿 Günlük Doğa İçeriği\n\n"
+        f"{tweet_text}\n\n"
+        f"🤖 AI: {ai_model}\n"
+        f"📏 {len(tweet_text)} karakter\n\n"
+        "⚠️ Twikit kaldırıldı.\n"
+        "ℹ️ X paylaşımı yapılmadı."
+    )
 
-Bu kod **Twikit'sizdir**, dolayısıyla şu anda:
+    send_telegram_log(telegram_message)
 
-**Gemini/Groq → Tweet oluştur → Telegram bildirimi**
+    print()
+    print("🎉 PROGRAM BAŞARIYLA TAMAMLANDI.")
 
-yapar.
+    return 0
 
-**X'e paylaşmaz.**
+except Exception as e:
 
-Senin asıl istediğin akış ise:
+    print()
+    print("=" * 60)
+    print("❌ PROGRAM HATASI")
+    print("=" * 60)
+    print(str(e))
+    print("=" * 60)
 
-**Gemini → doğa tweeti → X'e otomatik gönder → Telegram bildir**
+    send_telegram_log(
+        f"❌ Doğa botu hata verdi:\n\n{str(e)}"
+    )
 
-Bunun için Twikit yerine **X'in resmi API'sini** kullanmamız gerekiyor. Bu şekilde `ondemand.s`, `KEY_BYTE`, `cookies.json` gibi Twikit problemlerinin tamamından kurtulabiliriz.
+    return 1
 ```
+
+if **name** == "**main**":
+sys.exit(main())
