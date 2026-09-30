@@ -8,7 +8,6 @@ from google import genai
 
 try:
     from groq import Groq
-
     GROQ_AVAILABLE = True
 except ImportError:
     GROQ_AVAILABLE = False
@@ -101,56 +100,66 @@ def generate_ai_tweet():
         " EKLEME."
     )
 
-    # 1. Gemini (3 Defa Retry ile)
+    # 1. Gemini (Doğru model isimleri ile Retry mekanizması)
     if GEMINI_API_KEY:
-        for attempt in range(1, 4):
-            try:
-                ai_client = genai.Client(api_key=GEMINI_API_KEY)
-                response = ai_client.models.generate_content(
-                    model="gemini-3.8-flash", contents=prompt
-                )
-                if response.text:
-                    return response.text.strip(), "Gemini 3.8 Flash"
-            except Exception as e:
-                print(
-                    f"⚠️ Gemini deneme {attempt}/3 başarısız ({e}), bekleniyor..."
-                )
-                time.sleep(2)
+        # Geçerli Gemini modelleri
+        gemini_models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+        ai_client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        for model_name in gemini_models:
+            for attempt in range(1, 3):
+                try:
+                    print(f"🤖 Gemini deneniyor: {model_name} (Deneme {attempt})...")
+                    response = ai_client.models.generate_content(
+                        model=model_name, contents=prompt
+                    )
+                    if response.text:
+                        return response.text.strip(), f"Gemini ({model_name})"
+                except Exception as e:
+                    print(f"⚠️ Gemini ({model_name}) hata: {e}")
+                    time.sleep(2)
 
-    # 2. Groq (Her hesapta açık olan garanti Llama3 modeli)
+    # 2. Groq Fallback
     if GROQ_API_KEY and GROQ_AVAILABLE:
-        try:
-            groq_client = Groq(api_key=GROQ_API_KEY)
-            completion = groq_client.chat.completions.create(
-                model="llama3-8b-8192",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=150,
-            )
-            if completion.choices[0].message.content:
-                return completion.choices[0].message.content.strip(), (
-                    "Groq (Llama3-8b)"
+        groq_models = ["llama-3.3-70b-versatile", "llama3-8b-8192"]
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        
+        for g_model in groq_models:
+            try:
+                print(f"🤖 Groq deneniyor: {g_model}...")
+                completion = groq_client.chat.completions.create(
+                    model=g_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=150,
                 )
-        except Exception as e:
-            print(f"⚠️ Groq tweet üretimi başarısız: {e}")
+                if completion.choices[0].message.content:
+                    return completion.choices[0].message.content.strip(), f"Groq ({g_model})"
+            except Exception as e:
+                print(f"⚠️ Groq ({g_model}) tweet üretimi başarısız: {e}")
 
     raise Exception("❌ Hiçbir Yapay Zeka servisi içerik üretemedi!")
 
 
 async def post_daily_tweet():
-    await login()
+    try:
+        await login()
+        tweet_text, ai_model = generate_ai_tweet()
 
-    tweet_text, ai_model = generate_ai_tweet()
+        print(f"🚀 Tweet Paylaşılıyor ({ai_model}):\n{tweet_text}")
+        await client.create_tweet(text=tweet_text)
 
-    print(f"🚀 Tweet Paylaşılıyor ({ai_model}):\n{tweet_text}")
-    await client.create_tweet(text=tweet_text)
-
-    telegram_msg = (
-        f"✅ **Yeni Doğa Tweeti Paylaşıldı!**\n\n"
-        f"📝 **İçerik:**\n{tweet_text}\n\n"
-        f"🤖 **Kullanılan AI:** `{ai_model}`"
-    )
-    send_telegram_log(telegram_msg)
+        telegram_msg = (
+            f"✅ **Yeni Doğa Tweeti Paylaşıldı!**\n\n"
+            f"📝 **İçerik:**\n{tweet_text}\n\n"
+            f"🤖 **Kullanılan AI:** `{ai_model}`"
+        )
+        send_telegram_log(telegram_msg)
+        print("✅ Tweet başarıyla gönderildi ve Telegram'a bildirildi.")
+    except Exception as e:
+        error_msg = f"❌ **X Otomasyon Hatası:**\n`{str(e)}`"
+        print(error_msg)
+        send_telegram_log(error_msg)
 
 
 if __name__ == "__main__":
