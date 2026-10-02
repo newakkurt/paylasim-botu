@@ -16,13 +16,14 @@ try:
         try:
             return await _orig_get_indices(self, response_text, *args, **kwargs)
         except Exception:
-            row_index_match = re.search(r'\((\d+)\)', response_text)
-            key_bytes_match = re.search(r'\[([\d,\s]+)\]', response_text)
+            text_str = str(response_text)  # BeautifulSoup -> str
+            row_index_match = re.search(r'\((\d+)\)', text_str)
+            key_bytes_match = re.search(r'\[([\d,\s]+)\]', text_str)
             if row_index_match and key_bytes_match:
                 row_index = int(row_index_match.group(1))
-                key_bytes = [int(x.strip()) for x in key_bytes_match.group(1).split(',')]
+                key_bytes = [int(x.strip()) for x in key_bytes_match.group(1).split(',') if x.strip()]
                 return row_index, key_bytes
-            raise Exception("Couldn't get KEY_BYTE indices via patch")
+            raise
 
     tx.ClientTransaction.get_indices = _patched_get_indices
 
