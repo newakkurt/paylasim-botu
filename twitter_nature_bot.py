@@ -58,6 +58,32 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else None
 
+# --- COOKIE FORMAT DÖNÜŞTÜRÜCÜ ---
+def parse_cookies_data(raw_cookies_json):
+    """
+    X_COOKIES_JSON ister liste ister dict formatında gelsin,
+    twikit'in beklediği dict formatına (key: value) dönüştürür.
+    """
+    if not raw_cookies_json:
+        return None
+    
+    try:
+        data = json.loads(raw_cookies_json)
+        # Eğer liste formatında gelmişse (Cookie-Editor vb. eklentiler)
+        if isinstance(data, list):
+            cookie_dict = {}
+            for item in data:
+                if isinstance(item, dict) and 'name' in item and 'value' in item:
+                    cookie_dict[item['name']] = item['value']
+            return cookie_dict
+        # Zaten dict formatında ise
+        elif isinstance(data, dict):
+            return data
+    except Exception as e:
+        print(f"⚠️ Cookie parse hatası: {e}")
+    
+    return None
+
 # --- 300 YEDEK BİLGİ HAVUZU (AI ÇÖKERSE KESİNTİSİZ ÇALIŞMA İÇİN) ---
 FALLBACK_NOTES = [
     "Did you know? Trees in a forest can communicate and share nutrients through an underground fungal network often called the 'Wood Wide Web'. #NatureFacts #ForestLife",
@@ -186,13 +212,19 @@ def get_weather_info():
 # --- CORE TWEET PAYLAŞIM MOTORU ---
 async def post_to_x(text, media_path=None):
     client = Client('en-US')
-    if not X_COOKIES_JSON:
-        print("❌ X_COOKIES_JSON eksik.")
+    cookies = parse_cookies_data(X_COOKIES_JSON)
+
+    if not cookies:
+        print("❌ X_COOKIES_JSON eksik veya çözümlenemedi.")
         return None
 
-    client.set_cookies(json.loads(X_COOKIES_JSON))
+    try:
+        client.set_cookies(cookies)
+    except Exception as e:
+        print(f"❌ Çerezler atanırken hata oluştu: {e}")
+        return None
+
     media_ids = []
-    
     if media_path and os.path.exists(media_path):
         try:
             m_id = await client.upload_media(media_path)
@@ -219,8 +251,15 @@ async def post_to_x(text, media_path=None):
 # --- AKILLI TAKİP VE ETKİLEŞİM MODÜLÜ ---
 async def engage_with_target():
     client = Client('en-US')
-    if not X_COOKIES_JSON: return
-    client.set_cookies(json.loads(X_COOKIES_JSON))
+    cookies = parse_cookies_data(X_COOKIES_JSON)
+    if not cookies:
+        return
+
+    try:
+        client.set_cookies(cookies)
+    except Exception as e:
+        print(f"❌ Çerezler atanırken hata oluştu: {e}")
+        return
 
     targets = ["NatGeo", "EarthPix", "BBCEarth", "OurPlanet"]
     target = random.choice(targets)
@@ -240,11 +279,10 @@ async def engage_with_target():
     except Exception as e:
         print(f"Etkileşim hatası: {e}")
 
-# --- GÖREVLER ---
+# --- GÖREV SEÇİCİ ---
 def run_job():
     now_hour = datetime.now().hour
 
-    # Elle Manuel Trigger tetiklendiyse veya saate göre otomatik seçim:
     # 07:00 - 09:00 arası -> Hava Durumu
     if 7 <= now_hour < 9:
         print("☀️ Hava durumu görevi çalıştırılıyor...")
@@ -269,7 +307,7 @@ def run_job():
         asyncio.run(engage_with_target())
         notify_telegram("🎯 **Hedef sayfalar ile etkileşim sağlandı.**")
 
-    # Varsayılan / Diğer saatler -> Görsel İçerik Paylaşımı
+    # Diğer saatler -> Görsel İçerik Paylaşımı
     else:
         print("📸 Görsel içerik görevi çalıştırılıyor...")
         ctx = get_season_context()
