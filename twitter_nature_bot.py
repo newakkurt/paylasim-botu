@@ -5,10 +5,8 @@ import random
 import re
 import sys
 import time
-import threading
 from datetime import datetime
 import requests
-import schedule
 import telebot
 
 # --- TWIKIT KEY_BYTE DÜZELTME YAMASI ---
@@ -137,7 +135,7 @@ def generate_ai_text(prompt: str) -> str:
             if res.status_code == 200:
                 return res.json()['choices'][0]['message']['content'].strip()
         except Exception as e:
-            print(f"⚠️️ OpenRouter Hatası: {e}")
+            print(f"⚠️ OpenRouter Hatası: {e}")
 
     # 4. Fallback (300 Bilgi Havuzu)
     print("🚨 AI motorları yanıt vermedi. Yedek bilgi notundan seçiliyor...")
@@ -208,7 +206,7 @@ async def post_to_x(text, media_path=None):
         os.remove(media_path)
 
     # Kendi paylaşımımızın altına yorum atma
-    await asyncio.sleep(random.randint(15, 30))
+    await asyncio.sleep(random.randint(10, 20))
     comment_prompt = f"Write a short, engaging follow-up English comment or question for this tweet: '{text}'. Under 120 chars."
     comment_text = generate_ai_text(comment_prompt)
     try:
@@ -227,8 +225,8 @@ async def engage_with_target():
     targets = ["NatGeo", "EarthPix", "BBCEarth", "OurPlanet"]
     target = random.choice(targets)
     
-    # Twitter radarını engellemek için 2-4 dk rastgele bekleme
-    await asyncio.sleep(random.randint(120, 240))
+    # Twitter radarını engellemek için 30-60 sn bekleme
+    await asyncio.sleep(random.randint(30, 60))
     try:
         user = await client.get_user_by_screen_name(target)
         await user.follow()
@@ -242,101 +240,47 @@ async def engage_with_target():
     except Exception as e:
         print(f"Etkileşim hatası: {e}")
 
-# --- GÖREV TANIMLARI ---
-def job_weather():
-    text = get_weather_info()
-    img = fetch_hd_image("morning sunrise nature")
-    asyncio.run(post_to_x(text, img))
-    notify_telegram(f"☀️ **Sabah Hava Durumu Paylaşıldı!**\n\n_{text}_")
+# --- GÖREVLER ---
+def run_job():
+    now_hour = datetime.now().hour
 
-def job_photo():
-    ctx = get_season_context()
-    prompt = f"Write a beautiful, inspiring English tweet about nature landscapes or wildlife. Context: {ctx}. Max 220 chars. 2 hashtags."
-    text = generate_ai_text(prompt)
-    img = fetch_hd_image("scenic nature landscape")
-    asyncio.run(post_to_x(text, img))
-    notify_telegram(f"📸 **Görsel İçerik Paylaşıldı!**\n\n_{text}_")
+    # Elle Manuel Trigger tetiklendiyse veya saate göre otomatik seçim:
+    # 07:00 - 09:00 arası -> Hava Durumu
+    if 7 <= now_hour < 9:
+        print("☀️ Hava durumu görevi çalıştırılıyor...")
+        text = get_weather_info()
+        img = fetch_hd_image("morning sunrise nature")
+        asyncio.run(post_to_x(text, img))
+        notify_telegram(f"☀️ **Sabah Hava Durumu Paylaşıldı!**\n\n_{text}_")
 
-def job_video():
-    # Projedeki video üretici modül entegre edilene kadar HD doğa görseli ile zenginleştirilmiş içerik paylaşır
-    ctx = get_season_context()
-    prompt = f"Write a short, engaging English nature fact or reel caption. Context: {ctx}. Max 200 chars."
-    text = generate_ai_text(prompt)
-    img = fetch_hd_image("nature video style landscape")
-    asyncio.run(post_to_x(text, img))
-    notify_telegram(f"🎥 **Video İçerik Paylaşıldı!**\n\n_{text}_")
+    # 15:00 veya 21:00 saatleri -> Video Görevi
+    elif now_hour in [15, 21]:
+        print("🎥 Video görevi çalıştırılıyor...")
+        ctx = get_season_context()
+        prompt = f"Write a short, engaging English nature fact or reel caption. Context: {ctx}. Max 200 chars."
+        text = generate_ai_text(prompt)
+        img = fetch_hd_image("nature video style landscape")
+        asyncio.run(post_to_x(text, img))
+        notify_telegram(f"🎥 **Video İçerik Paylaşıldı!**\n\n_{text}_")
 
-def job_interaction():
-    asyncio.run(engage_with_target())
+    # 22:00 -> Etkileşim Görevi
+    elif now_hour == 22:
+        print("🎯 Etkileşim ve takip görevi çalıştırılıyor...")
+        asyncio.run(engage_with_target())
+        notify_telegram("🎯 **Hedef sayfalar ile etkileşim sağlandı.**")
 
-# --- TELEGRAM BOT KOMUTLARI ---
-if bot:
-    @bot.message_handler(commands=['start', 'yardim', 'help'])
-    def cmd_help(msg):
-        text = (
-            "🤖 **Twitter Nature Bot Yönetimi**\n\n"
-            "• `/yardim` - Komut listesini gösterir.\n"
-            "• `/paylas` veya `/paylasim` - Anlık görselli doğa tweeti atar.\n"
-            "• `/video` - Anlık video/içerik tweeti atar.\n"
-            "• `/hava` - Anlık hava durumu tweeti atar.\n"
-            "• `/etkilesim` - Hedef doğa sayfaları ile etkileşime geçer (Takip + Yorum).\n"
-            "• `/durum` - Bot çalışma durumunu gösterir."
-        )
-        bot.reply_to(msg, text, parse_mode="Markdown")
-
-    @bot.message_handler(commands=['paylas', 'paylasim'])
-    def cmd_paylas(msg):
-        bot.reply_to(msg, "⏳ Görsel paylaşım tetiklendi...")
-        threading.Thread(target=job_photo).start()
-
-    @bot.message_handler(commands=['video'])
-    def cmd_video(msg):
-        bot.reply_to(msg, "⏳ Video paylaşım tetiklendi...")
-        threading.Thread(target=job_video).start()
-
-    @bot.message_handler(commands=['hava'])
-    def cmd_hava(msg):
-        bot.reply_to(msg, "⏳ Hava durumu paylaşımı tetiklendi...")
-        threading.Thread(target=job_weather).start()
-
-    @bot.message_handler(commands=['etkilesim'])
-    def cmd_etkilesim(msg):
-        bot.reply_to(msg, "⏳ Hedef hesaplarla etkileşim başlatıldı...")
-        threading.Thread(target=job_interaction).start()
-
-    @bot.message_handler(commands=['durum'])
-    def cmd_durum(msg):
-        status = (
-            "🟢 **Bot Çalışıyor**\n\n"
-            "📅 **Günlük Akış Programı (TSI):**\n"
-            "• 08:00 ☀️ Hava Durumu Paylaşımı\n"
-            "• 12:00 📸 1. Görsel Paylaşımı\n"
-            "• 15:00 🎥 1. Video Paylaşımı\n"
-            "• 18:00 📸 2. Görsel Paylaşımı\n"
-            "• 21:00 🎥 2. Video Paylaşımı\n"
-            "• 22:00 🎯 Otomatik Etkileşim & Takip"
-        )
-        bot.reply_to(msg, status, parse_mode="Markdown")
-
-# --- ZAMANLAYICI (SCHEDULE) AYARLARI ---
-# Günde 5 Paylaşım Planı:
-schedule.every().day.at("08:00").do(job_weather)      # 1x Hava Durumu
-schedule.every().day.at("12:00").do(job_photo)        # 1x Görsel
-schedule.every().day.at("15:00").do(job_video)        # 1x Video
-schedule.every().day.at("18:00").do(job_photo)        # 2x Görsel
-schedule.every().day.at("21:00").do(job_video)        # 2x Video
-schedule.every().day.at("22:00").do(job_interaction)  # Etkileşim/Takipçi Kasma
+    # Varsayılan / Diğer saatler -> Görsel İçerik Paylaşımı
+    else:
+        print("📸 Görsel içerik görevi çalıştırılıyor...")
+        ctx = get_season_context()
+        prompt = f"Write a beautiful, inspiring English tweet about nature landscapes or wildlife. Context: {ctx}. Max 220 chars. 2 hashtags."
+        text = generate_ai_text(prompt)
+        img = fetch_hd_image("scenic nature landscape")
+        asyncio.run(post_to_x(text, img))
+        notify_telegram(f"📸 **Görsel İçerik Paylaşıldı!**\n\n_{text}_")
 
 if __name__ == "__main__":
-    print("🚀 twitter_nature_bot.py başlatılıyor...")
-
-    # Telegram Dinleyicisi (Thread üzerinde)
-    if bot:
-        t = threading.Thread(target=bot.infinity_polling, daemon=True)
-        t.start()
-        print("✅ Telegram bot dinleyicisi aktif.")
-
-    # Otomatik Zamanlayıcı Döngüsü
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    print("🚀 GitHub Actions İşlemi Başlatıldı...")
+    run_job()
+    print("✅ Görev tamamlandı. Çalışma sonlandırılıyor.")
+    sys.exit(0)
