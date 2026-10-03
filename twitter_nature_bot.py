@@ -209,6 +209,14 @@ async def post_to_x(text, media_path=None):
     except Exception as e:
         return False, f"Cookie set hatası: {e}"
 
+    # Oturumun geçerliliğini test et
+    try:
+        user = await client.user()
+        if not user:
+            return False, "Çerezler geçersiz veya X oturumu kapatmış."
+    except Exception as e:
+        return False, f"Oturum doğrulama hatası: {e}"
+
     media_ids = []
     if media_path and os.path.exists(media_path):
         try:
@@ -218,12 +226,12 @@ async def post_to_x(text, media_path=None):
         except Exception as e:
             print(f"Görsel yükleme atlandı: {e}")
 
-   try:
+    try:
         tweet = await client.create_tweet(text=text, media_ids=media_ids if media_ids else None)
         if tweet and hasattr(tweet, 'id'):
             print(f"✅ Tweet atıldı! ID: {tweet.id}")
         else:
-            return False, "Tweet oluşturulamadı (X isteği reddetti veya yanıt parse edilemedi)."
+            return False, "Tweet atılamadı, yanıt boş döndü."
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:100]}"
     
