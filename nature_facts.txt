@@ -1,0 +1,300 @@
+trees|Trees in a forest can share nutrients and warning signals through underground fungal networks called mycorrhizal networks.
+trees|The coast redwood is the tallest tree species on Earth, with some individuals towering over 110 meters.
+trees|Bristlecone pines in California's White Mountains can live for more than 4,000 years.
+trees|A giant sequoia can stand over 80 meters tall and is among the most massive living things on Earth.
+trees|Tree rings record each year of growth, and wide or narrow rings reveal wet or dry years in a tree's life.
+trees|Aspen groves can be a single organism: thousands of trunks connected by one root system.
+trees|Pando, a quaking aspen colony in Utah, is considered one of the heaviest living organisms on Earth.
+trees|Baobab trees in Africa can store thousands of liters of water in their swollen trunks.
+trees|Mangrove trees thrive in salty coastal water and protect shorelines from storm surges and erosion.
+trees|Leaves look green because chlorophyll reflects green light while absorbing red and blue.
+trees|In autumn, leaves reveal yellow and orange pigments that were hidden by chlorophyll all summer.
+trees|A large tree can release hundreds of liters of water into the air each day through its leaves.
+trees|Forests cover about 31 percent of Earth's land area.
+trees|Bamboo is a grass, and some species can grow almost a meter in a single day.
+trees|The ginkgo tree has survived for over 200 million years, earning the name "living fossil."
+trees|Douglas fir trees grow bark thick enough to survive many moderate wildfires.
+trees|Banyan trees send down aerial roots from their branches that become new trunks.
+trees|Cherry blossoms bloom for only about one to two weeks each spring.
+trees|Lodgepole pine cones of some populations open fully only after being heated by fire.
+trees|Trees can release chemicals that signal their neighbors when insects attack their leaves.
+trees|The Amazon rainforest is home to an estimated 390 billion trees.
+trees|A tree's roots often spread two to three times wider than its crown.
+trees|Old-growth forests store large amounts of carbon in their trunks, roots, and soil.
+trees|The Joshua tree is not a tree but a type of yucca, found in the Mojave Desert.
+trees|Willow bark contains salicin, the natural compound that inspired the development of aspirin.
+trees|The cork oak regrows its bark after harvest, and it can be stripped about every nine years.
+trees|Sap rises in tall trees through tiny tubes, pulled upward as water evaporates from the leaves.
+trees|Fig trees depend on tiny fig wasps for pollination, a partnership millions of years old.
+trees|Birch trees are among the first species to grow back after a fire or clearing.
+trees|A walk in the forest can lower stress levels, a practice known in Japan as forest bathing.
+ocean|The ocean covers about 71 percent of Earth's surface and holds roughly 97 percent of its water.
+ocean|More than 80 percent of the ocean remains unmapped and unexplored.
+ocean|The blue whale is the largest animal ever known, reaching up to 30 meters long.
+ocean|A blue whale's heart is about the size of a small car.
+ocean|Octopuses have three hearts and blue blood.
+ocean|Sea otters hold hands while sleeping so they don't drift apart.
+ocean|Sea otters have the densest fur of any animal, with up to a million hairs per square inch.
+ocean|The Great Barrier Reef is the largest coral reef system on Earth and can be seen from space.
+ocean|Coral reefs cover less than one percent of the ocean floor but support about a quarter of marine species.
+ocean|Sea turtles often return to the very beach where they hatched to lay their own eggs.
+ocean|Jellyfish have existed for over 500 million years, long before the dinosaurs.
+ocean|Jellyfish have no brain, heart, or bones, and are about 95 percent water.
+ocean|The Mariana Trench is nearly 11 kilometers deep, deeper than Mount Everest is tall.
+ocean|Dolphins sleep with half of their brain at a time so they can keep surfacing to breathe.
+ocean|Each dolphin has a signature whistle that works like a name.
+ocean|Male seahorses carry the eggs and give birth to the young.
+ocean|Sharks have been around for over 400 million years, older than trees.
+ocean|A shark's skeleton is made of cartilage, the same flexible material as your ears and nose.
+ocean|Humpback whales sing complex songs that can travel for many kilometers underwater.
+ocean|A narwhal's tusk is an elongated tooth that can grow over two meters long.
+ocean|Clownfish live safely among sea anemone tentacles thanks to a protective mucus layer.
+ocean|Phytoplankton in the ocean produce a large share of the oxygen we breathe, by many estimates about half.
+ocean|The ocean's tides are caused mainly by the gravitational pull of the Moon.
+ocean|The Bay of Fundy in Canada has some of the highest tides in the world, reaching about 16 meters.
+ocean|Sea stars can regrow lost arms, and some species can regenerate a whole body from a single arm.
+ocean|Giant kelp can grow up to half a meter per day, forming underwater forests.
+ocean|Pufferfish inflate by swallowing water to look bigger to predators.
+ocean|Manta rays can have a wingspan of up to seven meters and glide through the water like underwater birds.
+ocean|The deep sea is home to bioluminescent creatures that make their own light.
+ocean|The Sargasso Sea is the only sea without a land border, bounded instead by ocean currents.
+ocean|Sea level is not perfectly even; currents and gravity make it slightly higher in some places than others.
+ocean|Hydrothermal vents on the seafloor support life that runs on chemical energy instead of sunlight.
+ocean|Orcas are the largest members of the dolphin family and hunt in coordinated family pods.
+ocean|A group of jellyfish is called a smack.
+ocean|The Pacific is the largest and deepest ocean, covering about a third of Earth's surface.
+ocean|The leatherback sea turtle can dive deeper than 1,000 meters in search of jellyfish.
+ocean|Parrotfish help create white sand beaches by grinding coral into fine sand.
+ocean|Lobsters can live for decades and keep growing throughout their lives.
+ocean|Seagrass meadows are nurseries for many fish species and store carbon in the sediment beneath them.
+ocean|Whale sharks are the largest fish, reaching over 12 meters, yet they feed mostly on tiny plankton.
+animals|Elephants can recognize themselves in a mirror, a sign of advanced self-awareness.
+animals|Elephants communicate over long distances with low rumbles that travel through the ground.
+animals|A giraffe has the same number of neck bones as we do, just seven, but each one is hugely elongated.
+animals|Wombats produce cube-shaped droppings.
+animals|Koala fingerprints are so similar to human ones that they can be hard to tell apart under a microscope.
+animals|Sloths move so slowly that algae can grow on their fur, helping them blend into the trees.
+animals|Polar bear fur is transparent, and the skin beneath it is black.
+animals|Bats are the only mammals capable of true, sustained flight.
+animals|Many bats use echolocation, sending out sound pulses and listening for the echoes to navigate in the dark.
+animals|Cheetahs can reach speeds of about 100 kilometers per hour in short bursts.
+animals|Lions can sleep up to 20 hours a day.
+animals|A snow leopard's long tail helps it balance on cliffs and wraps around its body for warmth.
+animals|Beavers' teeth never stop growing and are kept sharp by gnawing wood.
+animals|Beaver dams create wetlands that support many other species.
+animals|Gorillas share about 98 percent of their DNA with humans.
+animals|Pangolins are the only mammals covered in scales.
+animals|Orangutans build a fresh sleeping nest of branches in the treetops almost every night.
+animals|Red pandas use their bushy tails as blankets in cold mountain forests.
+animals|Meerkats take turns standing guard so the rest of the group can forage safely.
+animals|A camel's hump stores fat, not water, which it uses as energy in the desert.
+animals|Tigers have striped skin as well as striped fur, and no two tigers share the same pattern.
+animals|Wolves live in family packs and communicate with howls that can carry for kilometers.
+animals|Moose are excellent swimmers and can dive to feed on aquatic plants.
+animals|Red foxes are thought to use Earth's magnetic field to help aim their pounces on prey hidden under snow.
+animals|Squirrels often forget some of the nuts they bury, and those can grow into new trees.
+animals|Hippo skin produces a reddish oily secretion that is thought to act like a natural sunscreen.
+animals|A baby kangaroo, called a joey, is only about the size of a jellybean at birth.
+animals|Bison are the largest land mammals in North America.
+animals|Chameleons can move their eyes independently, giving them nearly 360-degree vision.
+animals|Chameleons change color mostly to communicate and regulate temperature, not just to hide.
+animals|Axolotls can regenerate limbs, parts of their heart, and even parts of their brain.
+animals|Frogs absorb water through their skin instead of drinking it.
+animals|Wood frogs can freeze solid in winter and thaw back to life in spring.
+animals|Galapagos tortoises can live for well over 100 years.
+animals|Crocodilians have survived since the age of the dinosaurs.
+animals|Mountain goats climb nearly vertical cliffs thanks to hooves with gripping inner pads.
+animals|Reindeer eyes shift from gold in summer to blue in winter to help them see in low light.
+animals|Elephant seals can dive for well over an hour and reach depths of more than 1,000 meters.
+animals|Capybaras are the world's largest rodents and are famously friendly with other animals.
+animals|Platypuses are mammals that lay eggs and detect prey using electric fields.
+animals|Giant pandas spend up to 14 hours a day eating bamboo.
+animals|Okapis are related to giraffes and have zebra-like stripes on their legs.
+birds|Arctic terns migrate from the Arctic to Antarctica and back, one of the longest journeys of any animal.
+birds|Hummingbirds are the only birds that can fly backward.
+birds|A hummingbird's heart can beat over 1,000 times a minute during flight.
+birds|Owls can rotate their heads about 270 degrees thanks to extra neck bones and flexible blood vessels.
+birds|Owl feathers have soft edges that let them fly almost silently.
+birds|A group of crows is called a murder, and crows can remember human faces for years.
+birds|Crows and ravens are among the most intelligent birds and can use tools.
+birds|Peregrine falcons can exceed 300 kilometers per hour in a dive, the fastest speed of any animal.
+birds|Albatrosses can glide for thousands of kilometers over the ocean with barely a wingbeat.
+birds|The wandering albatross has the longest wingspan of any living bird, reaching over three meters.
+birds|Emperor penguins huddle together to survive Antarctic winters colder than minus 40 degrees Celsius.
+birds|Male emperor penguins incubate the egg on their feet through the Antarctic winter.
+birds|Flamingos get their pink color from pigments in the algae and shrimp they eat.
+birds|Woodpeckers have shock-absorbing skulls that protect their brains from repeated pecking.
+birds|Puffins can carry a dozen or more small fish in their beaks at one time.
+birds|Homing pigeons can find their way back over hundreds of kilometers, using the Sun and Earth's magnetic field.
+birds|Kiwis are flightless birds from New Zealand that lay one of the largest eggs relative to body size of any bird.
+birds|The ostrich is the largest living bird and can run at about 70 kilometers per hour.
+birds|Bar-tailed godwits have flown over 11,000 kilometers nonstop from Alaska to New Zealand.
+birds|Many songbirds learn their songs from adults, much like human children learn to speak.
+birds|Bowerbirds build and decorate elaborate structures called bowers to attract mates.
+birds|Swifts can stay in the air for months at a time, even sleeping while flying.
+birds|Bald eagles build some of the largest nests of any bird, sometimes weighing over a ton.
+birds|Toucans use their large, light beaks to reach fruit and to help release body heat.
+birds|Birds are the living descendants of dinosaurs.
+birds|The bee hummingbird of Cuba is the smallest bird in the world, weighing less than two grams.
+birds|Barn owls can locate prey in total darkness using hearing alone.
+birds|Geese fly in a V formation to save energy, taking turns leading the flock.
+birds|Many parrots live for decades, and some species can mimic human speech.
+birds|The kingfisher's beak shape helped inspire the design of Japan's high-speed bullet train.
+birds|Ducks stay dry thanks to a waterproof oil they spread over their feathers from a gland near the tail.
+insects|A honeybee colony can contain tens of thousands of bees working together.
+insects|A single honeybee produces only about a twelfth of a teaspoon of honey in its lifetime.
+insects|Honey never spoils; edible honey has been found in ancient Egyptian tombs.
+insects|Honeybees communicate the location of flowers through a "waggle dance."
+insects|Butterflies taste with their feet.
+insects|Monarch butterflies migrate thousands of kilometers to overwintering sites in Mexico.
+insects|A butterfly's wings are covered in thousands of tiny scales that create its colors.
+insects|Dragonflies have existed for over 300 million years, long before the dinosaurs.
+insects|Dragonflies can fly in any direction, including backward, and hover in place.
+insects|Ants can carry objects many times their own body weight.
+insects|Some ant supercolonies build vast networks of nests with millions of inhabitants.
+insects|Leafcutter ants farm fungus by growing it on leaves they carry into their nests.
+insects|Fireflies produce light through a chemical reaction that gives off almost no heat.
+insects|Termite mounds can reach several meters tall and stay at a steady temperature inside.
+insects|Crickets chirp faster as the temperature rises, so their song can be used to estimate it.
+insects|Some cicadas spend 13 or 17 years underground before emerging together.
+insects|A single ladybug can eat thousands of aphids in its lifetime.
+insects|Praying mantises can turn their heads nearly 180 degrees to scan their surroundings.
+insects|Dung beetles navigate using the stars, including the Milky Way.
+insects|Water striders walk on water thanks to surface tension and water-repelling hairs on their legs.
+insects|A silkworm cocoon is made of a single thread that can be nearly a kilometer long.
+insects|Beetles are the largest group of animals, making up roughly a quarter of all known species.
+insects|Some caterpillars multiply their body weight thousands of times before forming a chrysalis.
+insects|Monarch caterpillars eat only milkweed, which makes them toxic to many predators.
+insects|Bumblebees can "buzz pollinate," shaking flowers with their flight muscles to release pollen.
+insects|About one in three bites of the food we eat depends on pollinators, mostly insects.
+insects|Adult luna moths have no mouths and live only about a week on stored energy.
+insects|Stick insects blend in with twigs so well that predators often overlook them.
+insects|Grasshoppers can jump about twenty times their body length.
+insects|Glowworms in New Zealand caves use tiny lights to lure insects into sticky threads.
+weather|Lightning is about five times hotter than the surface of the Sun.
+weather|A lightning bolt can carry hundreds of millions of volts of electricity.
+weather|Thunder is the sound of air expanding explosively as lightning heats it.
+weather|Every snowflake forms around a tiny particle and grows into a six-sided crystal.
+weather|Raindrops are not tear-shaped; small ones are round and larger ones flatten like a hamburger bun.
+weather|Rainbows are full circles; from the ground we usually see only the top arc.
+weather|The smell of rain, called petrichor, comes from plant oils and compounds made by soil bacteria.
+weather|An average cumulus cloud can weigh around a million pounds, held aloft by rising warm air.
+weather|Fog is simply a cloud that touches the ground.
+weather|Hurricanes get their energy from warm ocean water.
+weather|The eye of a hurricane is a calm center surrounded by the storm's strongest winds.
+weather|Wind is caused by differences in air pressure created when the Sun heats Earth unevenly.
+weather|Auroras happen when charged particles from the Sun collide with gases in Earth's upper atmosphere.
+weather|Green is the most common aurora color, produced by oxygen about 100 kilometers up.
+weather|Dew forms when surfaces cool enough that water vapor in the air condenses into droplets.
+weather|Hail forms when raindrops are carried up and down by storm updrafts and freeze in layers.
+weather|Antarctica is the driest, windiest, and coldest continent on Earth.
+weather|It takes about a million cloud droplets to make a single raindrop.
+weather|Sunsets look red and orange because the atmosphere scatters blue light away over the longer path sunlight takes.
+weather|The sky is blue because air molecules scatter short blue wavelengths of sunlight more than red.
+weather|Dust devils are small spinning columns of air that form on hot, sunny days.
+weather|Monsoons are seasonal wind shifts that bring much of South Asia its yearly rainfall.
+weather|Snow is a good insulator, and animals like voles live in tunnels beneath it to stay warmer.
+weather|Lenticular clouds, shaped like smooth lenses, form when air flows over mountains.
+weather|Moonbows are rainbows made by moonlight, and they are much fainter than sunlight rainbows.
+weather|Sea breezes happen because land heats faster than water, pulling cooler air in from the sea.
+weather|Earth's atmosphere is about 78 percent nitrogen and 21 percent oxygen.
+earth|Earth is about 4.5 billion years old.
+earth|Mount Everest grows by a few millimeters each year as tectonic plates push together.
+earth|The Himalayas formed when the Indian plate collided with the Eurasian plate.
+earth|Earth's outer core is liquid iron, and its motion generates the magnetic field that shields us.
+earth|The Sahara was green and dotted with lakes just a few thousand years ago.
+earth|Volcanic soil is among the most fertile on Earth because it is rich in minerals.
+earth|The Pacific Ring of Fire hosts about 75 percent of the world's active volcanoes.
+earth|Hawaii's Mauna Kea is taller than Everest when measured from its base on the ocean floor.
+earth|Cave formations like stalactites grow very slowly, sometimes only a centimeter in a century.
+earth|Diamonds form deep in Earth under extreme heat and pressure and are carried up by volcanic eruptions.
+earth|The Grand Canyon was carved by the Colorado River over millions of years.
+earth|The Atacama Desert in Chile is one of the driest places on Earth, with some areas going years without rain.
+earth|Earth's continents drift at about the speed your fingernails grow.
+earth|Around 300 million years ago, all continents were joined in one supercontinent called Pangaea.
+earth|Angel Falls in Venezuela is the world's tallest uninterrupted waterfall, dropping nearly a kilometer.
+earth|Lake Baikal in Siberia is the world's deepest lake and holds about a fifth of Earth's unfrozen fresh water.
+earth|Salt flats like Bolivia's Salar de Uyuni can turn into a giant mirror when covered by a thin layer of water.
+earth|The Dead Sea is so salty that people float effortlessly on its surface.
+earth|The Amazon River discharges more water than any other river on Earth.
+earth|Ice caps and glaciers hold about 69 percent of the world's fresh water.
+earth|Iceland sits on the Mid-Atlantic Ridge, where two tectonic plates are slowly pulling apart.
+earth|Geysers like Old Faithful erupt when underground water is heated past boiling and forced upward.
+earth|Fossils of marine creatures have been found on mountaintops, showing that the rock once lay beneath the sea.
+earth|Desert dunes are shaped by wind, and some slowly migrate across the land.
+earth|Amber is fossilized tree resin that sometimes preserves insects from millions of years ago.
+earth|The oldest known minerals on Earth, zircon crystals from Australia, are over 4 billion years old.
+earth|Earth's tilt of about 23.5 degrees is what gives us the seasons.
+earth|The Moon is slowly drifting away from Earth by about 3.8 centimeters each year.
+earth|Earth is the only place in the known universe with liquid surface water and life.
+earth|About 400 million years ago, a year on Earth had roughly 400 days because days were shorter.
+earth|Natural arches, like those in Utah, are carved slowly by wind, water, and frost.
+plants|Young sunflowers track the Sun across the sky, a movement called heliotropism.
+plants|The corpse flower can reach about three meters tall and blooms only rarely.
+plants|Venus flytraps snap shut when trigger hairs inside the leaf are touched twice within a few seconds.
+plants|The mimosa plant folds its leaves when touched.
+plants|Lotus seeds have been revived after sitting dormant for over a thousand years.
+plants|Cacti store water in their stems and use spines to provide shade and deter animals.
+plants|Orchids are one of the two largest families of flowering plants, with over 25,000 species.
+plants|Vanilla comes from the seed pods of an orchid.
+plants|Watermeal, the world's smallest flowering plant, is smaller than a grain of rice.
+plants|Giant Amazon water lilies have leaves large enough to support a small child.
+plants|Mosses have no true roots and absorb water directly through their leaves.
+plants|Ferns reproduce with spores instead of seeds and date back over 350 million years.
+plants|Bees, birds, bats, and wind let plants reproduce without ever moving.
+plants|Many flowers have ultraviolet patterns invisible to us but clearly visible to bees.
+plants|Seeds travel by wind, water, animals, and even by exploding from their pods.
+plants|Dandelion seeds can drift for many kilometers on the breeze.
+plants|Coconuts can float across oceans and sprout on distant shores.
+plants|Lavender's scent comes from oils that help protect the plant and attract pollinators.
+plants|Carnivorous pitcher plants trap insects in slippery, fluid-filled leaves.
+plants|Strangler figs begin life high in a host tree and send roots down to the ground.
+plants|Photosynthesis turns sunlight, water, and carbon dioxide into sugar and oxygen.
+plants|Some plants release scents when damaged, warning nearby plants to prepare their defenses.
+plants|Moonflowers open at night and are pollinated by moths.
+plants|The saguaro cactus can live for over 150 years and grows very slowly.
+plants|Aloe vera stores water in thick leaves, helping it survive in dry climates.
+plants|Bluebells and other spring wildflowers bloom early to catch sunlight before the trees leaf out.
+fungi|Mushrooms are the fruiting bodies of fungi, whose main body is a hidden network of threads called mycelium.
+fungi|A honey fungus in Oregon spans several square kilometers, making it one of the largest living organisms.
+fungi|Fungi are more closely related to animals than to plants.
+fungi|Some fungi glow in the dark, a phenomenon called foxfire.
+fungi|Lichens are partnerships between fungi and algae, and can survive extreme cold and dryness.
+fungi|Penicillin, the first widely used antibiotic, was discovered in a mold.
+fungi|Fungi break down dead wood and leaves, recycling nutrients back into the soil.
+fungi|A teaspoon of healthy soil can hold billions of microorganisms.
+fungi|Truffles grow underground and rely on animals to find them and spread their spores.
+fungi|Mycorrhizal fungi partner with the roots of most land plants, trading nutrients for sugars.
+water|Only about 3 percent of Earth's water is fresh, and most of that is frozen.
+water|Rivers carry sediment to the sea, building fertile deltas like the Nile Delta.
+water|Waterfalls slowly retreat upstream as water erodes the rock at their edges.
+water|Wetlands filter pollutants from water and soak up floodwater like natural sponges.
+water|Many lakes turn over in spring and autumn, mixing oxygen-rich surface water into the depths.
+water|Springs bring groundwater to the surface, often staying at the same temperature year-round.
+water|Ice floats because water expands as it freezes, which keeps lakes alive below the surface in winter.
+water|The Nile is one of the longest rivers in the world, flowing north through northeastern Africa.
+water|Cenotes are natural sinkholes filled with clear groundwater, famous across Mexico's Yucatan.
+space|The Sun contains about 99.8 percent of all the mass in our solar system.
+space|Sunlight takes about eight minutes to reach Earth.
+space|A full Moon can be bright enough to cast shadows on a clear night.
+space|By some estimates, there are more stars in the universe than grains of sand on all of Earth's beaches.
+space|Saturn's rings are made mostly of ice particles ranging from dust grains to boulders.
+space|A meteor shower happens when Earth passes through trails of dust left behind by comets.
+space|The Milky Way is our home galaxy and contains hundreds of billions of stars.
+space|Jupiter's Great Red Spot is a storm larger than Earth that has raged for centuries.
+space|On a clear, dark night you can see a couple of thousand stars with the naked eye.
+space|Total solar eclipses happen because the Sun is about 400 times wider than the Moon and about 400 times farther away.
+space|A year on Mercury lasts only 88 Earth days.
+seasons|Many animals hibernate in winter, slowing their heartbeat dramatically to save energy.
+seasons|Bears can go the whole winter without eating while hibernating.
+seasons|Day length is the main cue that tells many plants to bloom and many birds to migrate.
+seasons|In autumn, deciduous trees pull nutrients back from their leaves before dropping them.
+seasons|Arctic foxes change from brown coats in summer to white in winter to match the landscape.
+seasons|Snowshoe hares turn white in winter, blending in with the snow.
+seasons|North of the Arctic Circle, the Sun does not set for weeks in midsummer.
+seasons|The Northern and Southern Hemispheres have opposite seasons because of Earth's tilt.
+seasons|Salmon return from the ocean to the streams where they were born to spawn, feeding forests along the way.
+seasons|More than a million wildebeest migrate across the Serengeti each year following the rains.
+seasons|Evergreen conifers keep their needles through winter, protected by waxy coatings.
+seasons|Equinoxes, in March and September, are the two days when day and night are nearly equal in length.
+seasons|The winter solstice marks the shortest day of the year in the Northern Hemisphere.
