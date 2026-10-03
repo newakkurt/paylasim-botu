@@ -7,35 +7,36 @@ import sys
 import time
 import requests
 
-# --- TWIKIT KEY_BYTE DÜZELTME YAMASI (MONKEY PATCH) ---
+# --- TWIKIT KEY_BYTE DÜZELTME YAMASI v2 ---
 try:
+    import base64
     import twikit.x_client_transaction.transaction as tx
 
-    _orig_get_indices = tx.ClientTransaction.get_indices
+    _INDICES_RE = re.compile(r'\(\w\[(\d{1,2})\],\s*16\)')
+    _ONDEMAND_URL_RE = re.compile(
+        r'https://abs\.twimg\.com/responsive-web/client-web/ondemand\.s\.[a-zA-Z0-9]+\.js'
+    )
+    _ONDEMAND_HASH_RE = re.compile(r'''['"]ondemand\.s['"]\s*:\s*['"](\w+)['"]''')
 
-    async def _patched_get_indices(self, response_text, *args, **kwargs):
-        try:
-            return await _orig_get_indices(self, response_text, *args, **kwargs)
-        except Exception:
-            text_str = str(response_text)  # BeautifulSoup -> str
-            row_index_match = re.search(r'\((\d+)\)', text_str)
-            key_bytes_match = re.search(r'\[([\d,\s]+)\]', text_str)
-            if row_index_match and key_bytes_match:
-                row_index = int(row_index_match.group(1))
-                key_bytes = [int(x.strip()) for x in key_bytes_match.group(1).split(',') if x.strip()]
-                return row_index, key_bytes
-            raise
+    async def _patched_get_indices(self, home_page_response, session, headers):
+        page = str(home_page_response)
+        if len(page) < 1000 and getattr(self, "home_page_response", None) is not None:
+            page = str(self.home_page_response)
+
+        m = _ONDEMAND_URL_RE.search(page)
+        if m:
+            js_url = m.group(0)
+        else:
+            h = _ONDEMAND_HASH_RE.search(page)
+            if not h:
+                raise Exception("ondemand.s dosyası sayfada bulunamadı")
+            js_url = f"https://abs.twimg.com/responsive-web/client-web/ondemand.s.{h.group(1)}a.js"
+
+        resp = await session.request(method="GET", url=js_url, headers=headers)
+        nums = [int(x) for x in _INDICES_RE.findall(str(resp.text))]
+        if len(nums) < 2:
+            raise Exception("KEY_BYTE indeksleri ondemand dosyasında bulunamadı")
+        return nums[0], nums[1:]
 
     tx.ClientTransaction.get_indices = _patched_get_indices
-
-    tx.ON_DEMAND_FILE_REGEX = re.compile(
-        r'https://abs\.twimg\.com/responsive-web/client-web/ondemand\.s\.[a-z0-9]+a\.js'
-    )
-except Exception as e:
-    print(f"⚠️ Twikit patch uygulanamadı: {e}")
-# ------------------------------------------------------
-
-from twikit import Client
-from google import genai
-from google.genai import types
-from groq import Groq
+    
