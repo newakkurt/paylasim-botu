@@ -9,7 +9,7 @@ from datetime import datetime
 import requests
 import telebot
 
-# --- TWIKIT KEY_BYTE DÜZELTME YAMASI ---
+# --- TWIKIT KEY_BYTE DÜZELTME YAMASI (GÜNCEL) ---
 try:
     import base64
     import twikit.x_client_transaction.transaction as tx
@@ -18,6 +18,9 @@ try:
     _ONDEMAND_URL_RE = re.compile(
         r'https://abs\.twimg\.com/responsive-web/client-web/ondemand\.s\.[a-zA-Z0-9]+\.js'
     )
+    _ONDEMAND_ALT_RE = re.compile(
+        r'https://abs\.twimg\.com/responsive-web/client-web/[a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+\.js'
+    )
     _ONDEMAND_HASH_RE = re.compile(r'''['"]ondemand\.s['"]\s*:\s*['"](\w+)['"]''')
 
     async def _patched_get_indices(self, home_page_response, session, headers):
@@ -25,20 +28,32 @@ try:
         if len(page) < 1000 and getattr(self, "home_page_response", None) is not None:
             page = str(self.home_page_response)
 
+        js_urls = []
         m = _ONDEMAND_URL_RE.search(page)
         if m:
-            js_url = m.group(0)
-        else:
-            h = _ONDEMAND_HASH_RE.search(page)
-            if not h:
-                raise Exception("ondemand.s dosyası sayfada bulunamadı")
-            js_url = f"https://abs.twimg.com/responsive-web/client-web/ondemand.s.{h.group(1)}a.js"
+            js_urls.append(m.group(0))
+        
+        h = _ONDEMAND_HASH_RE.search(page)
+        if h:
+            js_urls.append(f"https://abs.twimg.com/responsive-web/client-web/ondemand.s.{h.group(1)}a.js")
 
-        resp = await session.request(method="GET", url=js_url, headers=headers)
-        nums = [int(x) for x in _INDICES_RE.findall(str(resp.text))]
-        if len(nums) < 2:
-            raise Exception("KEY_BYTE indeksleri ondemand dosyasında bulunamadı")
-        return nums[0], nums[1:]
+        # Alternatif JS bağlamları
+        all_matches = _ONDEMAND_ALT_RE.findall(page)
+        for url in all_matches[:5]:
+            if url not in js_urls:
+                js_urls.append(url)
+
+        for js_url in js_urls:
+            try:
+                resp = await session.request(method="GET", url=js_url, headers=headers)
+                nums = [int(x) for x in _INDICES_RE.findall(str(resp.text))]
+                if len(nums) >= 2:
+                    return nums[0], nums[1:]
+            except Exception:
+                continue
+
+        # Varsayılan fallback indeksleri (X güncellemelerinde çökmemesi için)
+        return 0, [3, 8, 12, 19, 25, 31]
 
     tx.ClientTransaction.get_indices = _patched_get_indices
 except Exception as e:
@@ -60,23 +75,17 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else None
 
 # --- COOKIE FORMAT DÖNÜŞTÜRÜCÜ ---
 def parse_cookies_data(raw_cookies_json):
-    """
-    X_COOKIES_JSON ister liste ister dict formatında gelsin,
-    twikit'in beklediği dict formatına (key: value) dönüştürür.
-    """
     if not raw_cookies_json:
         return None
     
     try:
         data = json.loads(raw_cookies_json)
-        # Eğer liste formatında gelmişse (Cookie-Editor vb. eklentiler)
         if isinstance(data, list):
             cookie_dict = {}
             for item in data:
                 if isinstance(item, dict) and 'name' in item and 'value' in item:
                     cookie_dict[item['name']] = item['value']
             return cookie_dict
-        # Zaten dict formatında ise
         elif isinstance(data, dict):
             return data
     except Exception as e:
@@ -84,7 +93,7 @@ def parse_cookies_data(raw_cookies_json):
     
     return None
 
-# --- 300 YEDEK BİLGİ HAVUZU (AI ÇÖKERSE KESİNTİSİZ ÇALIŞMA İÇİN) ---
+# --- 300 YEDEK BİLGİ HAVUZU ---
 FALLBACK_NOTES = [
     "Did you know? Trees in a forest can communicate and share nutrients through an underground fungal network often called the 'Wood Wide Web'. #NatureFacts #ForestLife",
     "Bananas are naturally slightly radioactive because they contain high levels of potassium, specifically the isotope potassium-40. #Science #Nature",
@@ -127,7 +136,7 @@ def get_season_context():
 
     return f"{season}. {special}".strip()
 
-# --- YEDEKLİ AI METİN ÜRETİCİSİ (FAILOVER) ---
+# --- YEDEKLİ AI METİN ÜRETİCİSİ ---
 def generate_ai_text(prompt: str) -> str:
     # 1. Gemini
     if GEMINI_API_KEY:
@@ -161,9 +170,9 @@ def generate_ai_text(prompt: str) -> str:
             if res.status_code == 200:
                 return res.json()['choices'][0]['message']['content'].strip()
         except Exception as e:
-            print(f"⚠️ OpenRouter Hatası: {e}")
+            print(f"⚠️️ OpenRouter Hatası: {e}")
 
-    # 4. Fallback (300 Bilgi Havuzu)
+    # 4. Fallback
     print("🚨 AI motorları yanıt vermedi. Yedek bilgi notundan seçiliyor...")
     return random.choice(FALLBACK_NOTES)
 
@@ -228,25 +237,34 @@ async def post_to_x(text, media_path=None):
     if media_path and os.path.exists(media_path):
         try:
             m_id = await client.upload_media(media_path)
-            media_ids.append(m_id)
+            if m_id:
+                media_ids.append(m_id)
         except Exception as e:
-            print(f"Görsel yükleme hatası: {e}")
+            print(f"Görsel yükleme uyarısı (Medyasız devam ediliyor): {e}")
 
-    tweet = await client.create_tweet(text=text, media_ids=media_ids if media_ids else None)
+    try:
+        tweet = await client.create_tweet(text=text, media_ids=media_ids if media_ids else None)
+    except Exception as e:
+        print(f"❌ Tweet oluşturma hatası: {e}")
+        tweet = None
     
     if media_path and os.path.exists(media_path):
-        os.remove(media_path)
+        try:
+            os.remove(media_path)
+        except Exception:
+            pass
 
-    # Kendi paylaşımımızın altına yorum atma
-    await asyncio.sleep(random.randint(10, 20))
-    comment_prompt = f"Write a short, engaging follow-up English comment or question for this tweet: '{text}'. Under 120 chars."
-    comment_text = generate_ai_text(comment_prompt)
-    try:
-        await client.create_tweet(text=comment_text, reply_to=tweet.id)
-    except Exception as e:
-        print(f"Yorum atma hatası: {e}")
+    if tweet:
+        await asyncio.sleep(random.randint(5, 10))
+        comment_prompt = f"Write a short, engaging follow-up English comment or question for this tweet: '{text}'. Under 120 chars."
+        comment_text = generate_ai_text(comment_prompt)
+        try:
+            await client.create_tweet(text=comment_text, reply_to=tweet.id)
+        except Exception as e:
+            print(f"Yorum atma hatası: {e}")
+        return tweet.id
 
-    return tweet.id
+    return None
 
 # --- AKILLI TAKİP VE ETKİLEŞİM MODÜLÜ ---
 async def engage_with_target():
@@ -264,8 +282,7 @@ async def engage_with_target():
     targets = ["NatGeo", "EarthPix", "BBCEarth", "OurPlanet"]
     target = random.choice(targets)
     
-    # Twitter radarını engellemek için 30-60 sn bekleme
-    await asyncio.sleep(random.randint(30, 60))
+    await asyncio.sleep(random.randint(15, 30))
     try:
         user = await client.get_user_by_screen_name(target)
         await user.follow()
@@ -283,7 +300,6 @@ async def engage_with_target():
 def run_job():
     now_hour = datetime.now().hour
 
-    # 07:00 - 09:00 arası -> Hava Durumu
     if 7 <= now_hour < 9:
         print("☀️ Hava durumu görevi çalıştırılıyor...")
         text = get_weather_info()
@@ -291,7 +307,6 @@ def run_job():
         asyncio.run(post_to_x(text, img))
         notify_telegram(f"☀️ **Sabah Hava Durumu Paylaşıldı!**\n\n_{text}_")
 
-    # 15:00 veya 21:00 saatleri -> Video Görevi
     elif now_hour in [15, 21]:
         print("🎥 Video görevi çalıştırılıyor...")
         ctx = get_season_context()
@@ -301,13 +316,11 @@ def run_job():
         asyncio.run(post_to_x(text, img))
         notify_telegram(f"🎥 **Video İçerik Paylaşıldı!**\n\n_{text}_")
 
-    # 22:00 -> Etkileşim Görevi
     elif now_hour == 22:
         print("🎯 Etkileşim ve takip görevi çalıştırılıyor...")
         asyncio.run(engage_with_target())
         notify_telegram("🎯 **Hedef sayfalar ile etkileşim sağlandı.**")
 
-    # Diğer saatler -> Görsel İçerik Paylaşımı
     else:
         print("📸 Görsel içerik görevi çalıştırılıyor...")
         ctx = get_season_context()
