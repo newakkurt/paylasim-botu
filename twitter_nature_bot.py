@@ -9,7 +9,7 @@ from datetime import datetime
 import requests
 import telebot
 
-# --- TWIKIT KEY_BYTE DÜZELTME YAMASI ---
+# --- TWIKIT VE PATCH ---
 try:
     import base64
     import twikit.x_client_transaction.transaction as tx
@@ -87,28 +87,27 @@ def parse_cookies_data(raw_cookies_json):
         return None
     try:
         data = json.loads(raw_cookies_json)
-        if isinstance(data, list):
+        if isinstance(data, dict):
+            return data
+        elif isinstance(data, list):
             cookie_dict = {}
             for item in data:
                 if isinstance(item, dict) and 'name' in item and 'value' in item:
                     cookie_dict[item['name']] = item['value']
             return cookie_dict
-        elif isinstance(data, dict):
-            return data
     except Exception as e:
         print(f"⚠️ Cookie parse hatası: {e}")
     return None
 
 # --- YEDEK BİLGİ HAVUZU ---
 FALLBACK_NOTES = [
-    "Did you know? Trees in a forest can communicate and share nutrients through an underground fungal network often called the 'Wood Wide Web'. #NatureFacts #ForestLife #Trees #MotherNature #EcoSystem",
-    "Bananas are naturally slightly radioactive because they contain high levels of potassium, specifically the isotope potassium-40. #Science #Nature #ScienceFacts #Biology #NatureWonders",
-    "Honey never spoils. Archeologists have found 3,000-year-old honey in ancient Egyptian tombs that is still completely edible! #NatureMagic #Honey #History #AncientEgypt #FoodFacts",
-    "A single full-grown oak tree can absorb up to 50 gallons of water per day and produce enough oxygen for several people. #Trees #Environment #Forests #SaveTrees #GreenPlanet",
-    "Clouds look light and fluffy, but an average cumulus cloud weighs about 1.1 million pounds (500,000 kg)! #Weather #Nature #Atmosphere #Sky #NatureFacts",
-] + [f"Nature Fact #{i}: The diversity of ecosystems on Earth supports millions of interconnected species, creating balance across climate zones. #Nature #Ecology #Biodiversity #Earth #Wildlife" for i in range(6, 301)]
+    "Did you know? Trees in a forest can communicate and share nutrients through an underground fungal network. #NatureFacts #ForestLife #Trees #MotherNature #EcoSystem",
+    "Bananas are naturally slightly radioactive because they contain high levels of potassium. #Science #Nature #ScienceFacts #Biology #NatureWonders",
+    "Honey never spoils. Archeologists have found 3,000-year-old honey in ancient Egyptian tombs. #NatureMagic #Honey #History #AncientEgypt #FoodFacts",
+    "A single full-grown oak tree can absorb up to 50 gallons of water per day. #Trees #Environment #Forests #SaveTrees #GreenPlanet",
+    "Clouds look light and fluffy, but an average cumulus cloud weighs about 1.1 million pounds! #Weather #Nature #Atmosphere #Sky #NatureFacts",
+] + [f"Nature Fact #{i}: Ecosystem diversity supports millions of interconnected species across climate zones. #Nature #Ecology #Biodiversity #Earth #Wildlife" for i in range(6, 301)]
 
-# --- TELEGRAM BİLDİRİMİ ---
 def notify_telegram(message_text):
     if bot and TELEGRAM_CHAT_ID:
         try:
@@ -116,31 +115,21 @@ def notify_telegram(message_text):
         except Exception as e:
             print(f"Telegram bildirim hatası: {e}")
 
-# --- MEVSİM TESPİTİ ---
 def get_season_context():
     now = datetime.now()
     month, day = now.month, now.day
     if month in [12, 1, 2]:
-        season = "Winter (serene snow, calm forests, cold atmosphere, inner peace)"
+        season = "Winter (serene snow, calm forests)"
     elif month in [3, 4, 5]:
-        season = "Spring (fresh flowers blooming, vibrant leaves, rebirth, greenery)"
+        season = "Spring (fresh flowers, rebirth)"
     elif month in [6, 7, 8]:
-        season = "Summer (golden sunlight, warm oceans, lush green nature)"
+        season = "Summer (golden sunlight, warm oceans)"
     else:
-        season = "Autumn (golden leaves falling, misty crisp mornings, cozy vibes)"
+        season = "Autumn (golden leaves, misty mornings)"
+    return season
 
-    special = ""
-    if month == 4 and day == 22:
-        special = "Today is Earth Day! Emphasize environmental protection."
-    elif month == 6 and day == 5:
-        special = "Today is World Environment Day!"
-
-    return f"{season}. {special}".strip()
-
-# --- YEDEKLİ AI METİN ÜRETİCİSİ ---
 def generate_ai_text(prompt: str) -> str:
     generated = None
-    # 1. Gemini
     if GEMINI_API_KEY:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -148,9 +137,8 @@ def generate_ai_text(prompt: str) -> str:
             if res.status_code == 200:
                 generated = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
         except Exception as e:
-            print(f"⚠️ Gemini Hatası: {e}")
+            print(f"Gemini Hatası: {e}")
 
-    # 2. Groq
     if not generated and GROQ_API_KEY:
         try:
             url = "https://api.groq.com/openai/v1/chat/completions"
@@ -160,27 +148,13 @@ def generate_ai_text(prompt: str) -> str:
             if res.status_code == 200:
                 generated = res.json()['choices'][0]['message']['content'].strip()
         except Exception as e:
-            print(f"⚠️ Groq Hatası: {e}")
-
-    # 3. OpenRouter
-    if not generated and OPENROUTER_API_KEY:
-        try:
-            url = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
-            payload = {"model": "meta-llama/llama-3.1-8b-instruct:free", "messages": [{"role": "user", "content": prompt}]}
-            res = requests.post(url, headers=headers, json=payload, timeout=10)
-            if res.status_code == 200:
-                generated = res.json()['choices'][0]['message']['content'].strip()
-        except Exception as e:
-            print(f"⚠️ OpenRouter Hatası: {e}")
+            print(f"Groq Hatası: {e}")
 
     if not generated:
-        print("🚨 AI motorları yanıt vermedi. Yedek bilgi notundan seçiliyor...")
         generated = random.choice(FALLBACK_NOTES)
 
     return ensure_hashtags(generated)
 
-# --- HD GÖRSEL ÇEKME ---
 def fetch_hd_image(query: str = "nature landscape") -> str:
     file_path = "temp_image.jpg"
     if UNSPLASH_ACCESS_KEY:
@@ -211,32 +185,29 @@ def fetch_hd_image(query: str = "nature landscape") -> str:
             print(f"Pexels hatası: {e}")
     return None
 
-# --- HAVA DURUMU ALMA ---
 def get_weather_info():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=41.0082&longitude=28.9784&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Europe%2FIstanbul"
         res = requests.get(url, timeout=10).json()
         max_t = res['daily']['temperature_2m_max'][0]
         min_t = res['daily']['temperature_2m_min'][0]
-        text = f"Good morning! Today in Istanbul: High of {max_t}°C, Low of {min_t}°C. Embrace the beauty of nature today! ☀️🌿 #Weather #Nature #Istanbul #GoodMorning #NatureVibes"
+        text = f"Good morning! Today in Istanbul: High of {max_t}°C, Low of {min_t}°C. Embrace nature! ☀️🌿 #Weather #Nature #Istanbul #GoodMorning #NatureVibes"
     except Exception:
         text = "Good morning! Wishing you a peaceful and nature-filled day ahead! 🌿 #Nature #MorningVibes #Peaceful #GreenPlanet #Earth"
     return ensure_hashtags(text)
 
-# --- CORE TWEET PAYLAŞIM MOTORU ---
+# --- POST TO X ---
 async def post_to_x(text, media_path=None):
     client = Client('en-US')
     cookies = parse_cookies_data(X_COOKIES_JSON)
 
     if not cookies:
-        print("❌ X_COOKIES_JSON eksik veya çözümlenemedi.")
-        return False
+        return False, "Cookies parse edilemedi."
 
     try:
         client.set_cookies(cookies)
     except Exception as e:
-        print(f"❌ Çerezler atanırken hata oluştu: {e}")
-        return False
+        return False, f"Cookie set hatası: {e}"
 
     media_ids = []
     if media_path and os.path.exists(media_path):
@@ -245,15 +216,14 @@ async def post_to_x(text, media_path=None):
             if m_id:
                 media_ids.append(m_id)
         except Exception as e:
-            print(f"Görsel yükleme uyarısı (Medyasız devam ediliyor): {e}")
+            print(f"Görsel yükleme atlandı: {e}")
 
-    tweet = None
     try:
         tweet = await client.create_tweet(text=text, media_ids=media_ids if media_ids else None)
-        print(f"✅ Tweet başarıyla gönderildi! ID: {tweet.id}")
+        print(f"✅ Tweet atıldı! ID: {tweet.id}")
     except Exception as e:
-        print(f"❌ Tweet oluşturma hatası: {e}")
-        return False
+        # Hatanın gerçek nedenini döndür
+        return False, f"{type(e).__name__}: {str(e)[:100]}"
     
     if media_path and os.path.exists(media_path):
         try:
@@ -261,99 +231,30 @@ async def post_to_x(text, media_path=None):
         except Exception:
             pass
 
-    if tweet:
-        await asyncio.sleep(random.randint(5, 10))
-        comment_prompt = f"Write a short, engaging follow-up English comment or question for this tweet: '{text}'. Under 120 chars. Include at least 5 hashtags."
-        comment_text = generate_ai_text(comment_prompt)
-        try:
-            await client.create_tweet(text=comment_text, reply_to=tweet.id)
-            print("✅ Otomatik yorum gönderildi.")
-        except Exception as e:
-            print(f"Yorum atma hatası: {e}")
-        return True
+    return True, "OK"
 
-    return False
-
-# --- AKILLI TAKİP VE ETKİLEŞİM MODÜLÜ ---
-async def engage_with_target():
-    client = Client('en-US')
-    cookies = parse_cookies_data(X_COOKIES_JSON)
-    if not cookies:
-        return False
-
-    try:
-        client.set_cookies(cookies)
-    except Exception as e:
-        print(f"❌ Çerezler atanırken hata oluştu: {e}")
-        return False
-
-    targets = ["NatGeo", "EarthPix", "BBCEarth", "OurPlanet"]
-    target = random.choice(targets)
-    
-    await asyncio.sleep(random.randint(10, 20))
-    try:
-        user = await client.get_user_by_screen_name(target)
-        await user.follow()
-        
-        tweets = await user.get_tweets('Tweets', count=3)
-        if tweets:
-            prompt = f"Write a thoughtful, smart English comment on a nature post by @{target}. Under 140 chars. Sound natural. Include at least 5 hashtags."
-            reply_text = generate_ai_text(prompt)
-            await client.create_tweet(text=reply_text, reply_to=tweets[0].id)
-            print(f"🎯 @{target} hesabı takip edildi ve yorum yapıldı.")
-            return True
-    except Exception as e:
-        print(f"Etkileşim hatası: {e}")
-        return False
-
-# --- GÖREV SEÇİCİ ---
 def run_job():
     now_hour = datetime.now().hour
 
     if 7 <= now_hour < 9:
-        print("☀️ Hava durumu görevi çalıştırılıyor...")
         text = get_weather_info()
         img = fetch_hd_image("morning sunrise nature")
-        success = asyncio.run(post_to_x(text, img))
+        success, reason = asyncio.run(post_to_x(text, img))
         if success:
             notify_telegram(f"☀️ **Sabah Hava Durumu Paylaşıldı!**\n\n_{text}_")
         else:
-            notify_telegram("❌ **Sabah Hava Durumu Paylaşılamadı!** (X bağlantı hatası)")
-
-    elif now_hour in [15, 21]:
-        print("🎥 Video görevi çalıştırılıyor...")
-        ctx = get_season_context()
-        prompt = f"Write a short, engaging English nature fact or reel caption. Context: {ctx}. Max 180 chars. Include at least 5 relevant hashtags."
-        text = generate_ai_text(prompt)
-        img = fetch_hd_image("nature video style landscape")
-        success = asyncio.run(post_to_x(text, img))
-        if success:
-            notify_telegram(f"🎥 **Video İçerik Paylaşıldı!**\n\n_{text}_")
-        else:
-            notify_telegram("❌ **Video İçerik Paylaşılamadı!** (X bağlantı hatası)")
-
-    elif now_hour == 22:
-        print("🎯 Etkileşim ve takip görevi çalıştırılıyor...")
-        success = asyncio.run(engage_with_target())
-        if success:
-            notify_telegram("🎯 **Hedef sayfalar ile etkileşim sağlandı.**")
-        else:
-            notify_telegram("❌ **Etkileşim görevi başarısız oldu.**")
+            notify_telegram(f"❌ **Hava Durumu Hata:** `{reason}`")
 
     else:
-        print("📸 Görsel içerik görevi çalıştırılıyor...")
         ctx = get_season_context()
-        prompt = f"Write a beautiful, inspiring English tweet about nature landscapes or wildlife. Context: {ctx}. Max 180 chars. Include at least 5 relevant hashtags."
+        prompt = f"Write a beautiful English tweet about nature. Context: {ctx}. Max 180 chars. Include at least 5 relevant hashtags."
         text = generate_ai_text(prompt)
         img = fetch_hd_image("scenic nature landscape")
-        success = asyncio.run(post_to_x(text, img))
+        success, reason = asyncio.run(post_to_x(text, img))
         if success:
             notify_telegram(f"📸 **Görsel İçerik Paylaşıldı!**\n\n_{text}_")
         else:
-            notify_telegram("❌ **Görsel İçerik Paylaşılamadı!** (X bağlantı hatası)")
+            notify_telegram(f"❌ **Paylaşım Hatası:** `{reason}`")
 
 if __name__ == "__main__":
-    print("🚀 GitHub Actions İşlemi Başlatıldı...")
     run_job()
-    print("✅ Görev tamamlandı. Çalışma sonlandırılıyor.")
-    sys.exit(0)
