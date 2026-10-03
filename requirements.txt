@@ -3,3 +3,8 @@ google-genai
 groq
 requests
 beautifulsoup4
+
+twikit
+requests
+schedule
+pyTelegramBotAPI
