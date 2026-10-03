@@ -218,11 +218,13 @@ async def post_to_x(text, media_path=None):
         except Exception as e:
             print(f"Görsel yükleme atlandı: {e}")
 
-    try:
+   try:
         tweet = await client.create_tweet(text=text, media_ids=media_ids if media_ids else None)
-        print(f"✅ Tweet atıldı! ID: {tweet.id}")
+        if tweet and hasattr(tweet, 'id'):
+            print(f"✅ Tweet atıldı! ID: {tweet.id}")
+        else:
+            return False, "Tweet oluşturulamadı (X isteği reddetti veya yanıt parse edilemedi)."
     except Exception as e:
-        # Hatanın gerçek nedenini döndür
         return False, f"{type(e).__name__}: {str(e)[:100]}"
     
     if media_path and os.path.exists(media_path):
