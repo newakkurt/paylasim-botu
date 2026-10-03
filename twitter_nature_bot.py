@@ -139,7 +139,8 @@ def get_season_context() -> str:
     return "Autumn (golden leaves, misty mornings)"
 
 
-def generate_ai_text(prompt: str) -> str:
+def call_llms(prompt: str):
+    """Gemini -> Groq -> OpenRouter sırasıyla dener. Hepsi patlarsa None döner."""
     generated = None
     if GEMINI_API_KEY:
         try:
@@ -188,11 +189,97 @@ def generate_ai_text(prompt: str) -> str:
         except Exception as e:
             print(f"OpenRouter Hatası: {e}")
 
-    if not generated:
-        generated = pick_pool_note()
+    return generated
 
+
+def generate_ai_text(prompt: str) -> str:
+    generated = call_llms(prompt) or pick_pool_note()
     generated = generated.strip().strip('"').strip()
     return fit_for_x(ensure_hashtags(generated))
+
+
+# --- TWEET ALTINA YORUM (soru) ---
+QUESTION_BANK = {
+    "trees": [
+        "Which tree would you most like to stand beneath: a giant redwood or an ancient bristlecone pine? 🌲",
+        "If trees could talk, what do you think they would say about the forest around them? 🌳",
+    ],
+    "ocean": [
+        "What do you think is the most amazing creature hiding in the deep sea? 🌊",
+        "If you could dive anywhere in the world's oceans, where would you go? 🐠",
+    ],
+    "animals": [
+        "Which wild animal do you think is the most underrated? 🦥",
+        "If you could spend one day with any wild animal, which would you pick? 🐾",
+    ],
+    "birds": [
+        "Which bird do you think has the most impressive talent? 🦅",
+        "What is the most memorable bird you have ever seen in the wild? 🐦",
+    ],
+    "insects": [
+        "Which insect do you think deserves more credit for what it does? 🐝",
+        "What is your favorite insect, and why? 🦋",
+    ],
+    "weather": [
+        "What is the weather like where you are right now? 🌤️",
+        "Which weather do you love most: sun, rain, snow, or storms? ⛈️",
+    ],
+    "earth": [
+        "Which place on Earth is at the top of your bucket list? 🌍",
+        "What natural wonder has left you speechless? 🏔️",
+    ],
+    "plants": [
+        "What is your favorite plant or flower, and why? 🌸",
+        "Which plant do you think is the strangest in the world? 🌿",
+    ],
+    "fungi": [
+        "Have you ever spotted a wild mushroom on a walk? Where was it? 🍄",
+        "Which hidden part of nature surprises you the most? 🍄",
+    ],
+    "water": [
+        "What is your favorite river, lake, or waterfall? 💧",
+        "Where is the most beautiful body of water you have ever seen? 🏞️",
+    ],
+    "space": [
+        "What is the best night sky you have ever seen? 🌌",
+        "Which part of space makes you the most curious? ✨",
+    ],
+    "seasons": [
+        "Which season do you enjoy most in nature, and why? 🍂",
+        "What is the first sign of a new season that you notice? 🌱",
+    ],
+    "generic": [
+        "What is the most surprising thing you have learned about nature? 🌿",
+        "Where do you feel most connected to nature? 🌍",
+        "Which natural wonder would you love to see in person? ✨",
+        "What is your favorite place to spend time outdoors? 🌲",
+    ],
+}
+
+
+def guess_category(text: str):
+    for cat, tags in CATEGORY_TAGS.items():
+        if tags[0] in text:
+            return cat
+    return None
+
+
+def generate_question(tweet_text: str) -> str:
+    """Tweet'in konusuyla tutarlı, merak uyandıran kısa bir soru. LLM yoksa kategoriye göre hazır soru."""
+    prompt = (
+        "Here is a tweet:\n\n" + tweet_text + "\n\n"
+        "Write ONE short follow-up question (max 140 characters) about the same topic as this tweet. "
+        "It must spark curiosity and invite people to reply. "
+        "No hashtags, no quotation marks, no preamble. Output only the question."
+    )
+    q = call_llms(prompt)
+    if q:
+        lines = q.strip().strip('"').strip().splitlines()
+        q = re.sub(r"#\w+", "", lines[0]).strip().strip('"').strip() if lines else ""
+        if "?" in q and 10 <= len(q) <= 200:
+            return fit_for_x(q)
+    bank = QUESTION_BANK.get(guess_category(tweet_text)) or QUESTION_BANK["generic"]
+    return random.choice(bank)
 
 
 def fetch_hd_image_url(query: str = "nature landscape"):
@@ -285,11 +372,20 @@ def get_x_channel_id() -> str:
     raise RuntimeError(f"Buffer'da bağlı X kanalı bulunamadı. Görülen kanallar: {seen or 'hiç'}")
 
 
-def create_buffer_post(channel_id: str, text: str, image_url=None) -> str:
+def create_buffer_post(channel_id: str, text: str, image_url=None, reply=None) -> str:
     # 3 dk sonrasına zamanla: Buffer'ın kuyruk saatlerine bağımlı kalmaz
     due = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     assets = ""
-    if image_url:
+    metadata = ""
+    if reply:
+        # X thread: ilk tweet + altına kendi yorumu (görsel ilk tweet'te)
+        first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
+        if image_url:
+            first += " assets: [{ image: { url: %s } }]" % json.dumps(image_url)
+        first += " }"
+        second = "{ text: %s }" % json.dumps(reply, ensure_ascii=False)
+        metadata = "metadata: { twitter: { thread: [ %s %s ] } }" % (first, second)
+    elif image_url:
         assets = "assets: [{ image: { url: %s } }]" % json.dumps(image_url)
     mutation = """
     mutation {
@@ -300,12 +396,13 @@ def create_buffer_post(channel_id: str, text: str, image_url=None) -> str:
         mode: customScheduled
         dueAt: "%s"
         %s
+        %s
       }) {
         ... on PostActionSuccess { post { id } }
         ... on MutationError { message }
       }
     }
-    """ % (json.dumps(text, ensure_ascii=False), json.dumps(channel_id), due, assets)
+    """ % (json.dumps(text, ensure_ascii=False), json.dumps(channel_id), due, assets, metadata)
 
     result = gql(mutation)["createPost"]
     if "post" in result and result["post"]:
@@ -313,24 +410,32 @@ def create_buffer_post(channel_id: str, text: str, image_url=None) -> str:
     raise RuntimeError(result.get("message", "Bilinmeyen Buffer hatası"))
 
 
-def post_to_x(text: str, image_url=None):
+def post_to_x(text: str, image_url=None, reply=None):
+    """Döner: (başarılı mı, mesaj, yorum eklendi mi)"""
     if not BUFFER_API_KEY:
-        return False, "BUFFER_API_KEY eksik."
+        return False, "BUFFER_API_KEY eksik.", False
     try:
         channel_id = get_x_channel_id()
-        try:
-            post_id = create_buffer_post(channel_id, text, image_url)
-        except RuntimeError as e:
-            # Görsel yüzünden patladıysa metin-only dene
-            if image_url:
-                print(f"Görselli paylaşım başarısız ({e}); görselsiz deneniyor.")
-                post_id = create_buffer_post(channel_id, text, None)
-            else:
-                raise
-        print(f"✅ Buffer'a eklendi (3 dk içinde X'e çıkar). Post ID: {post_id}")
-        return True, "OK"
+        # Sırayla dene: yorumlu+görselli -> yorumsuz+görselli -> görselsiz
+        attempts = []
+        if reply:
+            attempts.append((image_url, reply))
+        attempts.append((image_url, None))
+        if image_url:
+            attempts.append((None, None))
+
+        last_error = None
+        for img, rp in attempts:
+            try:
+                post_id = create_buffer_post(channel_id, text, img, rp)
+                print(f"✅ Buffer'a eklendi (3 dk içinde X'e çıkar). Post ID: {post_id} | yorum: {bool(rp)} | görsel: {bool(img)}")
+                return True, "OK", bool(rp)
+            except RuntimeError as e:
+                print(f"Deneme başarısız (yorum={bool(rp)}, görsel={bool(img)}): {e}")
+                last_error = e
+        raise last_error
     except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:200]}"
+        return False, f"{type(e).__name__}: {str(e)[:200]}", False
 
 
 def run_job():
@@ -339,7 +444,7 @@ def run_job():
     if 7 <= hour < 10:
         text = get_weather_info()
         img = fetch_hd_image_url("morning sunrise nature")
-        title = "☀️ Sabah Hava Durumu Paylaşıldı!"
+        title = "☀️ Sabah Hava Durumu Buffer'a eklendi (3 dk içinde X'te)"
         err_title = "❌ Hava Durumu Hata:"
     else:
         ctx = get_season_context()
@@ -349,12 +454,16 @@ def run_job():
         )
         text = generate_ai_text(prompt)
         img = fetch_hd_image_url("scenic nature landscape")
-        title = "📸 Görsel İçerik Paylaşıldı!"
+        title = "📸 Görsel İçerik Buffer'a eklendi (3 dk içinde X'te)"
         err_title = "❌ Paylaşım Hatası:"
 
-    success, reason = post_to_x(text, img)
+    question = generate_question(text)
+    success, reason, replied = post_to_x(text, img, question)
     if success:
-        notify_telegram(f"{title}\n\n{text}")
+        msg = f"{title}\n\n{text}\n\n💬 Yorum: {question}"
+        if not replied:
+            msg += "\n\n⚠️ Yorum eklenemedi, sadece ana tweet gitti (loga bak)."
+        notify_telegram(msg)
     else:
         notify_telegram(f"{err_title} {reason}")
         print(reason)
