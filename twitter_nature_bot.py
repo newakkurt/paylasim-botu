@@ -5,9 +5,13 @@ import random
 import re
 import sys
 import time
+import threading
+from datetime import datetime
 import requests
+import schedule
+import telebot
 
-# --- TWIKIT KEY_BYTE DÜZELTME YAMASI v2 ---
+# --- TWIKIT KEY_BYTE DÜZELTME YAMASI ---
 try:
     import base64
     import twikit.x_client_transaction.transaction as tx
@@ -39,4 +43,300 @@ try:
         return nums[0], nums[1:]
 
     tx.ClientTransaction.get_indices = _patched_get_indices
+except Exception as e:
+    print(f"Twikit patch hatası: {e}")
+
+from twikit import Client
+
+# --- ENV VARIABLES ---
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
+X_COOKIES_JSON = os.getenv("X_COOKIES_JSON")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else None
+
+# --- 300 YEDEK BİLGİ HAVUZU (AI ÇÖKERSE KESİNTİSİZ ÇALIŞMA İÇİN) ---
+FALLBACK_NOTES = [
+    "Did you know? Trees in a forest can communicate and share nutrients through an underground fungal network often called the 'Wood Wide Web'. #NatureFacts #ForestLife",
+    "Bananas are naturally slightly radioactive because they contain high levels of potassium, specifically the isotope potassium-40. #Science #Nature",
+    "Honey never spoils. Archeologists have found 3,000-year-old honey in ancient Egyptian tombs that is still completely edible! #NatureMagic",
+    "A single full-grown oak tree can absorb up to 50 gallons of water per day and produce enough oxygen for several people. #Trees #Environment",
+    "Clouds look light and fluffy, but an average cumulus cloud weighs about 1.1 million pounds (500,000 kg)! #Weather #Nature",
+    "Octopuses have three hearts and blue blood. Two hearts pump blood to the gills, while the third pumps it to the rest of the body. #OceanLife",
+    "The Amazon Rainforest generates more than 20% of the Earth's oxygen supply, making it crucial for global ecology. #Rainforest #GreenPlanet",
+    "Sunflowers can be used to clean up radioactive waste. Their roots absorb toxins and heavy metals from contaminated soil. #Botany #EcoFriendly",
+    "Lightning strikes the Earth approximately 8 million times every single day. #NaturePower #Atmosphere",
+    "The smell of freshly cut grass is actually a plant distress call signal released to warn neighboring plants of danger. #PlantScience",
+] + [f"Nature Fact #{i}: The diversity of ecosystems on Earth supports millions of interconnected species, creating balance across climate zones. #Nature" for i in range(11, 301)]
+
+# --- TELEGRAM BİLDİRİMİ ---
+def notify_telegram(message_text):
+    if bot and TELEGRAM_CHAT_ID:
+        try:
+            bot.send_message(TELEGRAM_CHAT_ID, message_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Telegram bildirim hatası: {e}")
+
+# --- MEVSİM VEYA ÖZEL GÜN TESPİTİ ---
+def get_season_context():
+    now = datetime.now()
+    month, day = now.month, now.day
+    if month in [12, 1, 2]:
+        season = "Winter (serene snow, calm forests, cold atmosphere, inner peace)"
+    elif month in [3, 4, 5]:
+        season = "Spring (fresh flowers blooming, vibrant leaves, rebirth, greenery)"
+    elif month in [6, 7, 8]:
+        season = "Summer (golden sunlight, warm oceans, lush green nature)"
+    else:
+        season = "Autumn (golden leaves falling, misty crisp mornings, cozy vibes)"
+
+    special = ""
+    if month == 4 and day == 22:
+        special = "Today is Earth Day! Emphasize environmental protection."
+    elif month == 6 and day == 5:
+        special = "Today is World Environment Day!"
+
+    return f"{season}. {special}".strip()
+
+# --- YEDEKLİ AI METİN ÜRETİCİSİ (FAILOVER) ---
+def generate_ai_text(prompt: str) -> str:
+    # 1. Gemini
+    if GEMINI_API_KEY:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
+            if res.status_code == 200:
+                return res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        except Exception as e:
+            print(f"⚠️ Gemini Hatası: {e}")
+
+    # 2. Groq
+    if GROQ_API_KEY:
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+            payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code == 200:
+                return res.json()['choices'][0]['message']['content'].strip()
+        except Exception as e:
+            print(f"⚠️ Groq Hatası: {e}")
+
+    # 3. OpenRouter
+    if OPENROUTER_API_KEY:
+        try:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+            payload = {"model": "meta-llama/llama-3.1-8b-instruct:free", "messages": [{"role": "user", "content": prompt}]}
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code == 200:
+                return res.json()['choices'][0]['message']['content'].strip()
+        except Exception as e:
+            print(f"⚠️️ OpenRouter Hatası: {e}")
+
+    # 4. Fallback (300 Bilgi Havuzu)
+    print("🚨 AI motorları yanıt vermedi. Yedek bilgi notundan seçiliyor...")
+    return random.choice(FALLBACK_NOTES)
+
+# --- HD GÖRSEL ÇEKME ---
+def fetch_hd_image(query: str = "nature landscape") -> str:
+    file_path = "temp_image.jpg"
+    if UNSPLASH_ACCESS_KEY:
+        try:
+            url = f"https://api.unsplash.com/photos/random?query={query}&orientation=landscape&client_id={UNSPLASH_ACCESS_KEY}"
+            res = requests.get(url, timeout=10)
+            if res.status_code == 200:
+                img_url = res.json()['urls']['regular']
+                with open(file_path, 'wb') as f:
+                    f.write(requests.get(img_url, timeout=15).content)
+                return file_path
+        except Exception as e:
+            print(f"Unsplash hatası: {e}")
+
+    if PEXELS_API_KEY:
+        try:
+            headers = {"Authorization": PEXELS_API_KEY}
+            url = f"https://api.pexels.com/v1/search?query={query}&per_page=10"
+            res = requests.get(url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                photos = res.json().get('photos', [])
+                if photos:
+                    img_url = random.choice(photos)['src']['large2x']
+                    with open(file_path, 'wb') as f:
+                        f.write(requests.get(img_url, timeout=15).content)
+                    return file_path
+        except Exception as e:
+            print(f"Pexels hatası: {e}")
+    return None
+
+# --- HAVA DURUMU ALMA ---
+def get_weather_info():
+    try:
+        url = "https://api.open-meteo.com/v1/forecast?latitude=41.0082&longitude=28.9784&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Europe%2FIstanbul"
+        res = requests.get(url, timeout=10).json()
+        max_t = res['daily']['temperature_2m_max'][0]
+        min_t = res['daily']['temperature_2m_min'][0]
+        return f"Good morning! Today in Istanbul: High of {max_t}°C, Low of {min_t}°C. Embrace the beauty of nature today! ☀️🌿 #Weather #Nature"
+    except Exception:
+        return "Good morning! Wishing you a peaceful and nature-filled day ahead! 🌿 #Nature #MorningVibes"
+
+# --- CORE TWEET PAYLAŞIM MOTORU ---
+async def post_to_x(text, media_path=None):
+    client = Client('en-US')
+    if not X_COOKIES_JSON:
+        print("❌ X_COOKIES_JSON eksik.")
+        return None
+
+    client.set_cookies(json.loads(X_COOKIES_JSON))
+    media_ids = []
     
+    if media_path and os.path.exists(media_path):
+        try:
+            m_id = await client.upload_media(media_path)
+            media_ids.append(m_id)
+        except Exception as e:
+            print(f"Görsel yükleme hatası: {e}")
+
+    tweet = await client.create_tweet(text=text, media_ids=media_ids if media_ids else None)
+    
+    if media_path and os.path.exists(media_path):
+        os.remove(media_path)
+
+    # Kendi paylaşımımızın altına yorum atma
+    await asyncio.sleep(random.randint(15, 30))
+    comment_prompt = f"Write a short, engaging follow-up English comment or question for this tweet: '{text}'. Under 120 chars."
+    comment_text = generate_ai_text(comment_prompt)
+    try:
+        await client.create_tweet(text=comment_text, reply_to=tweet.id)
+    except Exception as e:
+        print(f"Yorum atma hatası: {e}")
+
+    return tweet.id
+
+# --- AKILLI TAKİP VE ETKİLEŞİM MODÜLÜ ---
+async def engage_with_target():
+    client = Client('en-US')
+    if not X_COOKIES_JSON: return
+    client.set_cookies(json.loads(X_COOKIES_JSON))
+
+    targets = ["NatGeo", "EarthPix", "BBCEarth", "OurPlanet"]
+    target = random.choice(targets)
+    
+    # Twitter radarını engellemek için 2-4 dk rastgele bekleme
+    await asyncio.sleep(random.randint(120, 240))
+    try:
+        user = await client.get_user_by_screen_name(target)
+        await user.follow()
+        
+        tweets = await user.get_tweets('Tweets', count=3)
+        if tweets:
+            prompt = f"Write a thoughtful, smart English comment on a nature post by @{target}. Under 140 chars. Sound natural."
+            reply_text = generate_ai_text(prompt)
+            await client.create_tweet(text=reply_text, reply_to=tweets[0].id)
+            print(f"🎯 @{target} hesabı takip edildi ve yorum yapıldı.")
+    except Exception as e:
+        print(f"Etkileşim hatası: {e}")
+
+# --- GÖREV TANIMLARI ---
+def job_weather():
+    text = get_weather_info()
+    img = fetch_hd_image("morning sunrise nature")
+    asyncio.run(post_to_x(text, img))
+    notify_telegram(f"☀️ **Sabah Hava Durumu Paylaşıldı!**\n\n_{text}_")
+
+def job_photo():
+    ctx = get_season_context()
+    prompt = f"Write a beautiful, inspiring English tweet about nature landscapes or wildlife. Context: {ctx}. Max 220 chars. 2 hashtags."
+    text = generate_ai_text(prompt)
+    img = fetch_hd_image("scenic nature landscape")
+    asyncio.run(post_to_x(text, img))
+    notify_telegram(f"📸 **Görsel İçerik Paylaşıldı!**\n\n_{text}_")
+
+def job_video():
+    # Projedeki video üretici modül entegre edilene kadar HD doğa görseli ile zenginleştirilmiş içerik paylaşır
+    ctx = get_season_context()
+    prompt = f"Write a short, engaging English nature fact or reel caption. Context: {ctx}. Max 200 chars."
+    text = generate_ai_text(prompt)
+    img = fetch_hd_image("nature video style landscape")
+    asyncio.run(post_to_x(text, img))
+    notify_telegram(f"🎥 **Video İçerik Paylaşıldı!**\n\n_{text}_")
+
+def job_interaction():
+    asyncio.run(engage_with_target())
+
+# --- TELEGRAM BOT KOMUTLARI ---
+if bot:
+    @bot.message_handler(commands=['start', 'yardim', 'help'])
+    def cmd_help(msg):
+        text = (
+            "🤖 **Twitter Nature Bot Yönetimi**\n\n"
+            "• `/yardim` - Komut listesini gösterir.\n"
+            "• `/paylas` veya `/paylasim` - Anlık görselli doğa tweeti atar.\n"
+            "• `/video` - Anlık video/içerik tweeti atar.\n"
+            "• `/hava` - Anlık hava durumu tweeti atar.\n"
+            "• `/etkilesim` - Hedef doğa sayfaları ile etkileşime geçer (Takip + Yorum).\n"
+            "• `/durum` - Bot çalışma durumunu gösterir."
+        )
+        bot.reply_to(msg, text, parse_mode="Markdown")
+
+    @bot.message_handler(commands=['paylas', 'paylasim'])
+    def cmd_paylas(msg):
+        bot.reply_to(msg, "⏳ Görsel paylaşım tetiklendi...")
+        threading.Thread(target=job_photo).start()
+
+    @bot.message_handler(commands=['video'])
+    def cmd_video(msg):
+        bot.reply_to(msg, "⏳ Video paylaşım tetiklendi...")
+        threading.Thread(target=job_video).start()
+
+    @bot.message_handler(commands=['hava'])
+    def cmd_hava(msg):
+        bot.reply_to(msg, "⏳ Hava durumu paylaşımı tetiklendi...")
+        threading.Thread(target=job_weather).start()
+
+    @bot.message_handler(commands=['etkilesim'])
+    def cmd_etkilesim(msg):
+        bot.reply_to(msg, "⏳ Hedef hesaplarla etkileşim başlatıldı...")
+        threading.Thread(target=job_interaction).start()
+
+    @bot.message_handler(commands=['durum'])
+    def cmd_durum(msg):
+        status = (
+            "🟢 **Bot Çalışıyor**\n\n"
+            "📅 **Günlük Akış Programı (TSI):**\n"
+            "• 08:00 ☀️ Hava Durumu Paylaşımı\n"
+            "• 12:00 📸 1. Görsel Paylaşımı\n"
+            "• 15:00 🎥 1. Video Paylaşımı\n"
+            "• 18:00 📸 2. Görsel Paylaşımı\n"
+            "• 21:00 🎥 2. Video Paylaşımı\n"
+            "• 22:00 🎯 Otomatik Etkileşim & Takip"
+        )
+        bot.reply_to(msg, status, parse_mode="Markdown")
+
+# --- ZAMANLAYICI (SCHEDULE) AYARLARI ---
+# Günde 5 Paylaşım Planı:
+schedule.every().day.at("08:00").do(job_weather)      # 1x Hava Durumu
+schedule.every().day.at("12:00").do(job_photo)        # 1x Görsel
+schedule.every().day.at("15:00").do(job_video)        # 1x Video
+schedule.every().day.at("18:00").do(job_photo)        # 2x Görsel
+schedule.every().day.at("21:00").do(job_video)        # 2x Video
+schedule.every().day.at("22:00").do(job_interaction)  # Etkileşim/Takipçi Kasma
+
+if __name__ == "__main__":
+    print("🚀 twitter_nature_bot.py başlatılıyor...")
+
+    # Telegram Dinleyicisi (Thread üzerinde)
+    if bot:
+        t = threading.Thread(target=bot.infinity_polling, daemon=True)
+        t.start()
+        print("✅ Telegram bot dinleyicisi aktif.")
+
+    # Otomatik Zamanlayıcı Döngüsü
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
