@@ -3,6 +3,7 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -20,16 +21,17 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Buffer ücretsiz API (X'e paylaşımı Buffer yapıyor, X API kredisi gerekmiyor)
+# Buffer ücretsiz API
 BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
-BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")  # opsiyonel, boşsa otomatik bulunur
+BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
 BUFFER_URL = "https://api.buffer.com"
 
 TZ = ZoneInfo("Europe/Istanbul")
 X_LIMIT = 280
 
-# --- HASHTAG GARANTİSİ ---
+# --- HASHTAG GARANTİSİ VE ETKİLEŞİM HEDEFLERİ ---
 DEFAULT_HASHTAGS = ["#Nature", "#Wildlife", "#Earth", "#NaturePhotography", "#Environment"]
+TARGET_ACCOUNTS = ["NatGeo", "BBCEarth", "EarthPix", "ourplanet", "Discovery"]
 
 
 def ensure_hashtags(text: str) -> str:
@@ -41,12 +43,10 @@ def ensure_hashtags(text: str) -> str:
 
 
 def x_length(text: str) -> int:
-    # UTF-16 birimi: emoji = 2, düz harf = 1 (X'in sayımına yakın)
     return len(text.encode("utf-16-le")) // 2
 
 
 def fit_for_x(text: str) -> str:
-    """280 karakteri aşarsa önce sondaki hashtag'leri atar, yetmezse keser."""
     text = text.strip()
     while x_length(text) > X_LIMIT:
         m = re.search(r"\s+#\w+\s*$", text)
@@ -70,7 +70,7 @@ FALLBACK_NOTES = [
 ]
 
 
-# --- 300'LÜK BİLGİ HAVUZU (nature_facts.txt, satır formatı: kategori|bilgi) ---
+# --- 300'LÜK BİLGİ HAVUZU ---
 CATEGORY_TAGS = {
     "trees": ["#Trees", "#Forest", "#TreeFacts", "#Nature"],
     "ocean": ["#Ocean", "#MarineLife", "#OceanFacts", "#Nature"],
@@ -104,7 +104,6 @@ def load_fact_pool():
 
 
 def pick_pool_note() -> str:
-    """Tüm LLM'ler patlarsa havuzdan seç. Güne ve saate göre sıralı gider, tekrar etmez."""
     pool = load_fact_pool()
     if not pool:
         return random.choice(FALLBACK_NOTES)
@@ -121,7 +120,7 @@ def notify_telegram(message_text: str):
     try:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": message_text},
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": message_text, "parse_mode": "Markdown"},
             timeout=10,
         )
     except Exception as e:
@@ -140,7 +139,6 @@ def get_season_context() -> str:
 
 
 def call_llms(prompt: str):
-    """Gemini -> Groq -> OpenRouter sırasıyla dener. Hepsi patlarsa None döner."""
     generated = None
     if GEMINI_API_KEY:
         try:
@@ -198,7 +196,6 @@ def generate_ai_text(prompt: str) -> str:
     return fit_for_x(ensure_hashtags(generated))
 
 
-# --- TWEET ALTINA YORUM (soru) ---
 QUESTION_BANK = {
     "trees": [
         "Which tree would you most like to stand beneath: a giant redwood or an ancient bristlecone pine? 🌲",
@@ -212,47 +209,9 @@ QUESTION_BANK = {
         "Which wild animal do you think is the most underrated? 🦥",
         "If you could spend one day with any wild animal, which would you pick? 🐾",
     ],
-    "birds": [
-        "Which bird do you think has the most impressive talent? 🦅",
-        "What is the most memorable bird you have ever seen in the wild? 🐦",
-    ],
-    "insects": [
-        "Which insect do you think deserves more credit for what it does? 🐝",
-        "What is your favorite insect, and why? 🦋",
-    ],
-    "weather": [
-        "What is the weather like where you are right now? 🌤️",
-        "Which weather do you love most: sun, rain, snow, or storms? ⛈️",
-    ],
-    "earth": [
-        "Which place on Earth is at the top of your bucket list? 🌍",
-        "What natural wonder has left you speechless? 🏔️",
-    ],
-    "plants": [
-        "What is your favorite plant or flower, and why? 🌸",
-        "Which plant do you think is the strangest in the world? 🌿",
-    ],
-    "fungi": [
-        "Have you ever spotted a wild mushroom on a walk? Where was it? 🍄",
-        "Which hidden part of nature surprises you the most? 🍄",
-    ],
-    "water": [
-        "What is your favorite river, lake, or waterfall? 💧",
-        "Where is the most beautiful body of water you have ever seen? 🏞️",
-    ],
-    "space": [
-        "What is the best night sky you have ever seen? 🌌",
-        "Which part of space makes you the most curious? ✨",
-    ],
-    "seasons": [
-        "Which season do you enjoy most in nature, and why? 🍂",
-        "What is the first sign of a new season that you notice? 🌱",
-    ],
     "generic": [
         "What is the most surprising thing you have learned about nature? 🌿",
         "Where do you feel most connected to nature? 🌍",
-        "Which natural wonder would you love to see in person? ✨",
-        "What is your favorite place to spend time outdoors? 🌲",
     ],
 }
 
@@ -265,7 +224,6 @@ def guess_category(text: str):
 
 
 def generate_question(tweet_text: str) -> str:
-    """Tweet'in konusuyla tutarlı, merak uyandıran kısa bir soru. LLM yoksa kategoriye göre hazır soru."""
     prompt = (
         "Here is a tweet:\n\n" + tweet_text + "\n\n"
         "Write ONE short follow-up question (max 140 characters) about the same topic as this tweet. "
@@ -283,7 +241,6 @@ def generate_question(tweet_text: str) -> str:
 
 
 def fetch_hd_image_url(query: str = "nature landscape"):
-    """Görseli indirmiyoruz; Buffer herkese açık doğrudan URL istiyor."""
     if UNSPLASH_ACCESS_KEY:
         try:
             res = requests.get(
@@ -293,7 +250,6 @@ def fetch_hd_image_url(query: str = "nature landscape"):
             )
             if res.status_code == 200:
                 data = res.json()
-                # Unsplash kuralı: kullanım sayacı için download endpoint'ine ping
                 try:
                     dl = data.get("links", {}).get("download_location")
                     if dl:
@@ -340,7 +296,7 @@ def get_weather_info() -> str:
     return fit_for_x(ensure_hashtags(text))
 
 
-# --- BUFFER (GraphQL, ücretsiz plan) ---
+# --- BUFFER (GraphQL) ---
 def gql(query: str) -> dict:
     res = requests.post(
         BUFFER_URL,
@@ -373,12 +329,10 @@ def get_x_channel_id() -> str:
 
 
 def create_buffer_post(channel_id: str, text: str, image_url=None, reply=None) -> str:
-    # 3 dk sonrasına zamanla: Buffer'ın kuyruk saatlerine bağımlı kalmaz
     due = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     assets = ""
     metadata = ""
     if reply:
-        # X thread: ilk tweet + altına kendi yorumu (görsel ilk tweet'te)
         first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
         if image_url:
             first += " assets: [{ image: { url: %s } }]" % json.dumps(image_url)
@@ -411,12 +365,10 @@ def create_buffer_post(channel_id: str, text: str, image_url=None, reply=None) -
 
 
 def post_to_x(text: str, image_url=None, reply=None):
-    """Döner: (başarılı mı, mesaj, yorum eklendi mi)"""
     if not BUFFER_API_KEY:
         return False, "BUFFER_API_KEY eksik.", False
     try:
         channel_id = get_x_channel_id()
-        # Sırayla dene: yorumlu+görselli -> yorumsuz+görselli -> görselsiz
         attempts = []
         if reply:
             attempts.append((image_url, reply))
@@ -438,7 +390,74 @@ def post_to_x(text: str, image_url=None, reply=None):
         return False, f"{type(e).__name__}: {str(e)[:200]}", False
 
 
+# --- TELEGRAM KOMUT HANDLERLARI VE BUTONLAR ---
+def send_telegram_help():
+    """/yardim komutu çağrıldığında yönlendirme metnini iletir."""
+    help_text = (
+        "📖 **DOĞA BOTU YARDIM VE KOMUT REHBERİ**\n\n"
+        "🤖 **Bot Nasıl Çalışır?**\n"
+        "• Bot otomatik saatlerde Gemini/Groq/OpenRouter AI kullanarak doğa ile ilgili tweetler üretir.\n"
+        "• Görseller Unsplash/Pexels HD kütüphanelerinden çekilir.\n"
+        "• Tweet ve altında otomatik soru-yorum Buffer üzerinden X'e iletilir.\n\n"
+        "⚡ **Mevcut Komutlar:**\n"
+        "• `/etkileşim` : Manuel etkileşim yapabileceğin canlı linkler ve hazır akıllı yorum üretir.\n"
+        "• `/yardım` : Bu yardım rehberini gösterir.\n\n"
+        "🛡️ **Neden API Kredisi Harcanmaz?**\n"
+        "Paylaşımlar Buffer API üzerinden yapıldığı için hesabın X API sınırlarına takılmaz ve tamamen ücretsizdir."
+    )
+    notify_telegram(help_text)
+
+
+def send_interaction_reminder(tweet_text: str = None):
+    """/etkilesim komutu çağrıldığında veya paylaşım sonrası 16. dakikada tetiklenir."""
+    context = tweet_text if tweet_text else "Nature, wildlife, and serene natural landscapes"
+
+    prompt = (
+        f"Generate a thoughtful, engaging, short comment (max 100 chars) that I can post on other popular nature tweets. "
+        f"Topic context: '{context[:100]}'. Do not use hashtags."
+    )
+    suggested_comment = call_llms(prompt) or "Incredible capture! Nature never ceases to amaze us. 🌿"
+    suggested_comment = suggested_comment.strip().strip('"').strip()
+
+    target_acc = random.choice(TARGET_ACCOUNTS)
+    account_url = f"https://x.com/{target_acc}"
+
+    reminder_msg = (
+        "🚀 **YARI OTOMATİK ETKİLEŞİM MODÜLÜ**\n\n"
+        f"💡 **Önerilen Akıllı Yorum:**\n`{suggested_comment}`\n\n"
+        f"1️⃣ **Canlı Doğa Akışı:**\n🔗 [Canlı #Nature Tweetleri](https://x.com/search?q=%23Nature%20OR%20%23Wildlife%20min_faves%3A10&f=live)\n"
+        "_(İlk 2-3 tweet'i beğen ve yukarıdaki yorumu yap)_\n\n"
+        f"2️⃣ **Hedef Büyük Hesap (@{target_acc}):**\n🔗 [{target_acc} Hesabına Git]({account_url})\n"
+        "_(Son gönderisini beğen veya takibe al)_\n\n"
+        "⏱️ *Süre: ~30 saniye | Ban Riski: %0!*"
+    )
+    notify_telegram(reminder_msg)
+
+
+def check_telegram_updates():
+    """Bot çalıştırıldığında Telegram'dan gelen /etkilesim veya /yardim komutlarını kontrol eder."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            updates = res.json().get("result", [])
+            for update in updates:
+                msg = update.get("message", {})
+                text = msg.get("text", "").strip().lower()
+                if text in ["/etkilesim", "/etkileşim"]:
+                    send_interaction_reminder()
+                elif text in ["/yardim", "/yardım"]:
+                    send_telegram_help()
+    except Exception as e:
+        print(f"Telegram komut okuma hatası: {e}")
+
+
 def run_job():
+    # Çalıştırılma esnasında gelen Telegram komutlarını kontrol et
+    check_telegram_updates()
+
     hour = datetime.now(TZ).hour
 
     if 7 <= hour < 10:
@@ -459,11 +478,20 @@ def run_job():
 
     question = generate_question(text)
     success, reason, replied = post_to_x(text, img, question)
+
     if success:
         msg = f"{title}\n\n{text}\n\n💬 Yorum: {question}"
         if not replied:
             msg += "\n\n⚠️ Yorum eklenemedi, sadece ana tweet gitti (loga bak)."
         notify_telegram(msg)
+
+        # 16 Dakika Bekleme & Otomatik Etkileşim Hatırlatması
+        print("⏳ Paylaşım yapıldı. Yarı otomatik etkileşim bildirimi için 16 dakika bekleniyor...")
+        time.sleep(960)
+
+        send_interaction_reminder(text)
+        print("✅ Yarı otomatik etkileşim bildirimi Telegram'a gönderildi.")
+
     else:
         notify_telegram(f"{err_title} {reason}")
         print(reason)
