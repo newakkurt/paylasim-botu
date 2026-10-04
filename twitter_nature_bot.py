@@ -3,11 +3,24 @@ import os
 import random
 import re
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import requests
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name) or default)
+    except ValueError:
+        return default
+
+
+def _env_flag(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes")
+
 
 # --- ENV VARIABLES ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -25,6 +38,14 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
 BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
 BUFFER_URL = "https://api.buffer.com"
+
+# Paylaşımdan kaç saniye sonra etkileşim hatırlatması gitsin (varsayılan 960 sn = 16 dk)
+ENGAGE_DELAY_SEC = _env_int("ENGAGE_DELAY_SEC", 960)
+# SKIP_WAIT=1 -> bekleme ve hatırlatma tamamen atlanır (test / manuel çalıştırma için)
+SKIP_WAIT = _env_flag("SKIP_WAIT")
+# ENABLE_TELEGRAM_POLL=1 -> script başlarken Telegram komutlarını kendisi okur.
+# Aynı token'ı başka bir bot (Render) dinliyorsa AÇMA, güncellemeleri birbirinden çalar.
+ENABLE_TELEGRAM_POLL = _env_flag("ENABLE_TELEGRAM_POLL")
 
 TZ = ZoneInfo("Europe/Istanbul")
 X_LIMIT = 280
@@ -115,14 +136,17 @@ def pick_pool_note() -> str:
 
 
 def notify_telegram(message_text: str):
+    """Telegram'a mesaj yollar. Markdown ayrıştırılamazsa düz metinle tekrar dener,
+    böylece tweet içindeki _ veya * gibi karakterler bildirimi sessizce öldürmez."""
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
         return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message_text[:4096]}
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": message_text, "parse_mode": "Markdown"},
-            timeout=10,
-        )
+        res = requests.post(url, data={**payload, "parse_mode": "Markdown"}, timeout=10)
+        if res.status_code != 200:
+            print(f"Telegram Markdown hatası {res.status_code}: {res.text[:150]} -> düz metin deneniyor")
+            requests.post(url, data=payload, timeout=10)
     except Exception as e:
         print(f"Telegram bildirim hatası: {e}")
 
@@ -394,26 +418,28 @@ def post_to_x(text: str, image_url=None, reply=None):
         return False, f"{type(e).__name__}: {str(e)[:200]}", False
 
 
-# --- TELEGRAM KOMUT HANDLERLARI VE BUTONLAR ---
+# --- TELEGRAM KOMUT HANDLERLARI ---
 def send_telegram_help():
     """/yardim komutu çağrıldığında yönlendirme metnini iletir."""
     help_text = (
-        "📖 **DOĞA BOTU YARDIM VE KOMUT REHBERİ**\n\n"
-        "🤖 **Bot Nasıl Çalışır?**\n"
+        "📖 *DOĞA BOTU YARDIM VE KOMUT REHBERİ*\n\n"
+        "🤖 *Bot Nasıl Çalışır?*\n"
         "• Bot otomatik saatlerde Gemini/Groq/OpenRouter AI kullanarak doğa ile ilgili tweetler üretir.\n"
         "• Görseller Unsplash/Pexels HD kütüphanelerinden çekilir.\n"
         "• Tweet ve altında otomatik soru-yorum Buffer üzerinden X'e iletilir.\n\n"
-        "⚡ **Mevcut Komutlar:**\n"
-        "• `/etkileşim` : Manuel etkileşim yapabileceğin canlı linkler ve hazır akıllı yorum üretir.\n"
-        "• `/yardım` : Bu yardım rehberini gösterir.\n\n"
-        "🛡️ **Neden API Kredisi Harcanmaz?**\n"
+        "⚡ *Mevcut Komutlar:*\n"
+        "• `/paylas` : Hemen bir tweet hazırlar ve Buffer'a ekler.\n"
+        "• `/etkilesim` : Canlı linkler, tek dokunuşla takip bağlantıları ve hazır akıllı yorum üretir.\n"
+        "• `/yardim` : Bu yardım rehberini gösterir.\n\n"
+        "🛡️ *Neden API Kredisi Harcanmaz?*\n"
         "Paylaşımlar Buffer API üzerinden yapıldığı için hesabın X API sınırlarına takılmaz ve tamamen ücretsizdir."
     )
     notify_telegram(help_text)
 
 
 def send_interaction_reminder(tweet_text: str = None):
-    """/etkilesim komutu çağrıldığında veya paylaşım sonrası 16. dakikada tetiklenir."""
+    """/etkilesim komutu çağrıldığında veya paylaşımdan sonra gecikmeyle tetiklenir.
+    Beğeni/takip ELLE yapılır; bot sadece hazır yorum ve tek dokunuşluk linkleri verir."""
     context = tweet_text if tweet_text else "Nature, wildlife, and serene natural landscapes"
 
     prompt = (
@@ -421,25 +447,25 @@ def send_interaction_reminder(tweet_text: str = None):
         f"Topic context: '{context[:100]}'. Do not use hashtags."
     )
     suggested_comment = call_llms(prompt) or "Incredible capture! Nature never ceases to amaze us. 🌿"
-    suggested_comment = suggested_comment.strip().strip('"').strip()
+    suggested_comment = suggested_comment.strip().strip('"').strip().replace("`", "'")
 
-    target_acc = random.choice(TARGET_ACCOUNTS)
-    account_url = f"https://x.com/{target_acc}"
+    targets = random.sample(TARGET_ACCOUNTS, k=min(3, len(TARGET_ACCOUNTS)))
+    follow_lines = "\n".join(f"• [@{a}](https://x.com/intent/follow?screen_name={a})" for a in targets)
 
     reminder_msg = (
-        "🚀 **YARI OTOMATİK ETKİLEŞİM MODÜLÜ**\n\n"
-        f"💡 **Önerilen Akıllı Yorum:**\n`{suggested_comment}`\n\n"
-        f"1️⃣ **Canlı Doğa Akışı:**\n🔗 [Canlı #Nature Tweetleri](https://x.com/search?q=%23Nature%20OR%20%23Wildlife%20min_faves%3A10&f=live)\n"
+        "🚀 *YARI OTOMATİK ETKİLEŞİM MODÜLÜ*\n\n"
+        f"💡 *Önerilen Akıllı Yorum:*\n`{suggested_comment}`\n\n"
+        "1️⃣ *Canlı Doğa Akışı:*\n🔗 [Canlı #Nature Tweetleri](https://x.com/search?q=%23Nature%20OR%20%23Wildlife%20min_faves%3A10&f=live)\n"
         "_(İlk 2-3 tweet'i beğen ve yukarıdaki yorumu yap)_\n\n"
-        f"2️⃣ **Hedef Büyük Hesap (@{target_acc}):**\n🔗 [{target_acc} Hesabına Git]({account_url})\n"
-        "_(Son gönderisini beğen veya takibe al)_\n\n"
-        "⏱️ *Süre: ~30 saniye | Ban Riski: %0!*"
+        "2️⃣ *Tek Dokunuşla Takip (onay ekranı açılır):*\n"
+        f"{follow_lines}\n\n"
+        "⏱️ _Süre: ~30 saniye. Beğeni ve takip elle yapıldığı için otomasyon kaynaklı hesap riski yok._"
     )
     notify_telegram(reminder_msg)
 
 
 def check_telegram_updates():
-    """Bot çalıştırıldığında Telegram'dan gelen /etkilesim veya /yardim komutlarını kontrol eder."""
+    """OPSİYONEL (ENABLE_TELEGRAM_POLL=1): script çalışırken bekleyen /etkilesim ve /yardim komutlarını işler."""
     if not TELEGRAM_BOT_TOKEN:
         return
     try:
@@ -462,10 +488,16 @@ def check_telegram_updates():
         print(f"Telegram komut okuma hatası: {e}")
 
 
-def run_job():
-    # Çalıştırılma esnasında gelen Telegram komutlarını kontrol et
-    check_telegram_updates()
+def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
+    """Tweet hazırlar ve Buffer'a ekler. Başarılıysa True döner.
 
+    wait=True                    -> paylaşımdan sonra ENGAGE_DELAY_SEC kadar uyur, sonra hatırlatma yollar
+                                    (GitHub Actions / komut satırı kullanımı)
+    wait=False, background_reminder=True
+                                 -> beklemez; hatırlatmayı arka plan zamanlayıcısıyla gönderir
+                                    (sürekli çalışan Telegram botu içinden /paylas için)
+    SKIP_WAIT=1                  -> hatırlatma hiç gönderilmez
+    """
     hour = datetime.now(TZ).hour
 
     if 7 <= hour < 10:
@@ -493,18 +525,27 @@ def run_job():
             msg += "\n\n⚠️ Yorum eklenemedi, sadece ana tweet gitti (loga bak)."
         notify_telegram(msg)
 
-        # 16 Dakika Bekleme & Otomatik Etkileşim Hatırlatması
-        print("⏳ Paylaşım yapıldı. Yarı otomatik etkileşim bildirimi için 16 dakika bekleniyor...")
-        time.sleep(960)
+        if SKIP_WAIT or ENGAGE_DELAY_SEC <= 0:
+            print("⏭️ Etkileşim hatırlatması atlandı (SKIP_WAIT / ENGAGE_DELAY_SEC).")
+        elif wait:
+            minutes = ENGAGE_DELAY_SEC // 60
+            print(f"⏳ Paylaşım yapıldı. Etkileşim bildirimi için {minutes} dk bekleniyor...")
+            time.sleep(ENGAGE_DELAY_SEC)
+            send_interaction_reminder(text)
+            print("✅ Yarı otomatik etkileşim bildirimi Telegram'a gönderildi.")
+        elif background_reminder:
+            timer = threading.Timer(ENGAGE_DELAY_SEC, send_interaction_reminder, args=(text,))
+            timer.daemon = True
+            timer.start()
+            print(f"⏳ Etkileşim hatırlatması {ENGAGE_DELAY_SEC // 60} dk sonra için zamanlandı.")
+        return True
 
-        send_interaction_reminder(text)
-        print("✅ Yarı otomatik etkileşim bildirimi Telegram'a gönderildi.")
-
-    else:
-        notify_telegram(f"{err_title} {reason}")
-        print(reason)
-        sys.exit(1)
+    notify_telegram(f"{err_title} {reason}")
+    print(reason)
+    return False
 
 
 if __name__ == "__main__":
-    run_job()
+    if ENABLE_TELEGRAM_POLL:
+        check_telegram_updates()
+    sys.exit(0 if run_job() else 1)
