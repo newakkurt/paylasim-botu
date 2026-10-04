@@ -288,6 +288,30 @@ def generate_question(tweet_text: str) -> str:
     bank = QUESTION_BANK.get(guess_category(tweet_text)) or QUESTION_BANK["generic"]
     return random.choice(bank)
 
+# --- MEDYA ÇEKME İŞLEMLERİ (VİDEO VE RESİM) ---
+
+def fetch_hd_video_url(query: str = "nature landscape") -> str:
+    """Pexels API üzerinden HD MP4 Video arar."""
+    if PEXELS_API_KEY:
+        try:
+            res = requests.get(
+                "https://api.pexels.com/videos/search",
+                headers={"Authorization": PEXELS_API_KEY},
+                params={"query": query, "per_page": 10, "orientation": "landscape"},
+                timeout=10,
+            )
+            if res.status_code == 200:
+                videos = res.json().get("videos", [])
+                if videos:
+                    chosen = random.choice(videos)
+                    for vf in chosen.get("video_files", []):
+                        if vf.get("file_type") == "video/mp4" and vf.get("quality") == "hd":
+                            return vf.get("link")
+                    if chosen.get("video_files"):
+                        return chosen["video_files"][0].get("link")
+        except Exception as e:
+            print(f"Pexels Video hatası: {e}")
+    return None
 
 def fetch_hd_image_url(query: str = "nature landscape"):
     if UNSPLASH_ACCESS_KEY:
@@ -380,6 +404,48 @@ def get_x_channel_id() -> str:
 def create_buffer_post(channel_id: str, text: str, image_url=None, reply=None) -> str:
     due = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     assets = ""
+def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=False, reply=None) -> str:
+    due = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    assets = ""
+    metadata = ""
+
+    # BU SATIR EKLENDİ: Video ise GraphQL nesnesi 'video', resim ise 'image' olur
+    media_asset_key = "video" if is_video else "image"
+
+    if reply:
+        first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
+        if media_url:
+            # BU SATIR GÜNCELLENDİ: media_asset_key kullanılıyor
+            first += f" assets: [{{ {media_asset_key}: {{ url: %s }} }}]" % json.dumps(media_url)
+        first += " }"
+        second = "{ text: %s }" % json.dumps(reply, ensure_ascii=False)
+        metadata = "metadata: { twitter: { thread: [ %s %s ] } }" % (first, second)
+    elif media_url:
+        # BU SATIR GÜNCELLENDİ: media_asset_key kullanılıyor
+        assets = f"assets: [{{ {media_asset_key}: {{ url: %s }} }}]" % json.dumps(media_url)
+
+    mutation = """
+    mutation {
+      createPost(input: {
+        text: %s
+        channelId: %s
+        schedulingType: automatic
+        mode: customScheduled
+        dueAt: "%s"
+        %s
+        %s
+      }) {
+        ... on PostActionSuccess { post { id } }
+        ... on MutationError { message }
+      }
+    }
+    """ % (json.dumps(text, ensure_ascii=False), json.dumps(channel_id), due, assets, metadata)
+
+    result = gql(mutation)["createPost"]
+    if "post" in result and result["post"]:
+        return result["post"]["id"]
+    raise RuntimeError(result.get("message", "Bilinmeyen Buffer hatası"))
+    
     metadata = ""
     if reply:
         first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
@@ -413,26 +479,27 @@ def create_buffer_post(channel_id: str, text: str, image_url=None, reply=None) -
     raise RuntimeError(result.get("message", "Bilinmeyen Buffer hatası"))
 
 
-def post_to_x(text: str, image_url=None, reply=None):
+def post_to_x(text: str, media_url=None, is_video=False, reply=None): # is_video eklendi
     if not BUFFER_API_KEY:
         return False, "BUFFER_API_KEY eksik.", False
     try:
         channel_id = get_x_channel_id()
         attempts = []
         if reply:
-            attempts.append((image_url, reply))
-        attempts.append((image_url, None))
-        if image_url:
+            attempts.append((media_url, reply))
+        attempts.append((media_url, None))
+        if media_url:
             attempts.append((None, None))
 
         last_error = None
-        for img, rp in attempts:
+        for med, rp in attempts:
             try:
-                post_id = create_buffer_post(channel_id, text, img, rp)
-                print(f"✅ Buffer'a eklendi (3 dk içinde X'e çıkar). Post ID: {post_id} | yorum: {bool(rp)} | görsel: {bool(img)}")
+                # BU SATIR GÜNCELLENDİ: is_video parametresi aktarılıyor
+                post_id = create_buffer_post(channel_id, text, med, is_video=is_video, reply=rp)
+                print(f"✅ Buffer'a eklendi. Post ID: {post_id} | Video: {is_video} | yorum: {bool(rp)}")
                 return True, "OK", bool(rp)
             except RuntimeError as e:
-                print(f"Deneme başarısız (yorum={bool(rp)}, görsel={bool(img)}): {e}")
+                print(f"Deneme başarısız: {e}")
                 last_error = e
         raise last_error
     except Exception as e:
@@ -510,27 +577,29 @@ def check_telegram_updates():
 
 
 def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
-    """Tweet hazırlar ve Buffer'a ekler. Başarılıysa True döner.
-
-    wait=True                    -> paylaşımdan sonra ENGAGE_DELAY_SEC kadar uyur, sonra hatırlatma yollar
-                                    (GitHub Actions / komut satırı kullanımı)
-    wait=False, background_reminder=True
-                                 -> beklemez; hatırlatmayı arka plan zamanlayıcısıyla gönderir
-                                    (sürekli çalışan Telegram botu içinden /paylas için)
-    SKIP_WAIT=1                  -> hatırlatma hiç gönderilmez
-    """
     hour = datetime.now(TZ).hour
 
     if NATURE_MORNING_WEATHER and 7 <= hour < 10:
         text = get_weather_info()
-        img = fetch_hd_image_url("morning sunrise nature")
-        title = "☀️ Sabah Hava Durumu Buffer'a eklendi (3 dk içinde X'te)"
+        # BU SATIR GÜNCELLENDİ
+        media_url = fetch_hd_video_url("morning sunrise nature") or fetch_hd_image_url("morning sunrise nature")
+        is_video = True if media_url and ".mp4" in media_url.lower() else False
+        title = "☀️ Sabah Hava Durumu Buffer'a eklendi"
         err_title = "❌ Hava Durumu Hata:"
     else:
         ctx = get_season_context()
         cat = random.choice(TOPIC_POOL)
-        topic, img_query = TOPICS[cat]
+        topic, query = TOPICS[cat]
         tags = " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
+
+        # BU BLOK EKLENDİ: Önce video aranır, bulunamazsa resme geçilir
+        media_url = fetch_hd_video_url(query)
+        is_video = True if media_url else False
+
+        if not media_url:
+            media_url = fetch_hd_image_url(query)
+            is_video = False
+
         prompt = (
             f"Write an engaging English tweet containing ONE surprising, true and well-established fact about {topic}. "
             "Only state facts you are sure about and do not invent numbers. "
@@ -540,12 +609,15 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
             "Output only the tweet text, no quotes, no preamble."
         )
         text = generate_ai_text(prompt)
-        img = fetch_hd_image_url(img_query)
-        title = f"📸 Görsel İçerik ({cat}) Buffer'a eklendi (3 dk içinde X'te)"
+        
+        # BU SATIRLAR GÜNCELLENDİ
+        media_type = "🎥 Video" if is_video else "📸 Görsel"
+        title = f"{media_type} İçerik ({cat}) Buffer'a eklendi"
         err_title = "❌ Paylaşım Hatası:"
 
     question = generate_question(text)
-    success, reason, replied = post_to_x(text, img, question)
+    # BU SATIR GÜNCELLENDİ: is_video iletiliyor
+    success, reason, replied = post_to_x(text, media_url, is_video=is_video, reply=question)
 
     if success:
         msg = f"{title}\n\n{text}\n\n💬 Yorum: {question}"
