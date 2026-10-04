@@ -46,6 +46,9 @@ SKIP_WAIT = _env_flag("SKIP_WAIT")
 # ENABLE_TELEGRAM_POLL=1 -> script başlarken Telegram komutlarını kendisi okur.
 # Aynı token'ı başka bir bot (Render) dinliyorsa AÇMA, güncellemeleri birbirinden çalar.
 ENABLE_TELEGRAM_POLL = _env_flag("ENABLE_TELEGRAM_POLL")
+# NATURE_MORNING_WEATHER=1 -> sabah 07-10 arası bu script hava durumu tweeti atar.
+# Varsayılan KAPALI: hava durumu zaten weather_bot.py / "/hava" komutuyla paylaşılıyor.
+NATURE_MORNING_WEATHER = _env_flag("NATURE_MORNING_WEATHER")
 
 TZ = ZoneInfo("Europe/Istanbul")
 X_LIMIT = 280
@@ -106,6 +109,24 @@ CATEGORY_TAGS = {
     "space": ["#Space", "#Astronomy", "#Cosmos", "#Nature"],
     "seasons": ["#Seasons", "#Wildlife", "#NatureFacts", "#Nature"],
 }
+
+
+# Tweet konuları: (AI'a verilecek konu tanımı, o konuya uygun görsel arama sorgusu)
+TOPICS = {
+    "animals": ("wild animals and wildlife", "wildlife animal nature"),
+    "birds": ("wild birds", "wild bird nature"),
+    "trees": ("forests and trees", "forest trees"),
+    "ocean": ("oceans, seas and marine life", "ocean sea underwater"),
+    "water": ("rivers, lakes and waterfalls", "waterfall river nature"),
+    "plants": ("plants, flowers and botany", "wild flowers plants"),
+    "insects": ("insects and pollinators", "insect macro nature"),
+    "earth": ("mountains, volcanoes and natural landscapes", "mountain landscape"),
+    "weather": ("weather, clouds and the sky", "dramatic sky clouds"),
+    "fungi": ("mushrooms and fungi", "mushrooms forest"),
+}
+# Vahşi yaşam, orman ve okyanus daha sık çıksın diye iki kez listelendi
+TOPIC_POOL = ["animals", "animals", "trees", "trees", "ocean", "ocean",
+              "birds", "water", "plants", "insects", "earth", "weather", "fungi"]
 
 
 def load_fact_pool():
@@ -500,20 +521,27 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
     """
     hour = datetime.now(TZ).hour
 
-    if 7 <= hour < 10:
+    if NATURE_MORNING_WEATHER and 7 <= hour < 10:
         text = get_weather_info()
         img = fetch_hd_image_url("morning sunrise nature")
         title = "☀️ Sabah Hava Durumu Buffer'a eklendi (3 dk içinde X'te)"
         err_title = "❌ Hava Durumu Hata:"
     else:
         ctx = get_season_context()
+        cat = random.choice(TOPIC_POOL)
+        topic, img_query = TOPICS[cat]
+        tags = " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
         prompt = (
-            f"Write a beautiful English tweet about nature. Context: {ctx}. "
-            "Max 180 chars. Include at least 5 relevant hashtags. Output only the tweet text."
+            f"Write an engaging English tweet containing ONE surprising, true and well-established fact about {topic}. "
+            "Only state facts you are sure about and do not invent numbers. "
+            f"Seasonal context (use only if it fits naturally): {ctx}. "
+            "Max 230 characters in total including hashtags. "
+            f"End with these hashtags plus 1-2 more relevant ones: {tags}. "
+            "Output only the tweet text, no quotes, no preamble."
         )
         text = generate_ai_text(prompt)
-        img = fetch_hd_image_url("scenic nature landscape")
-        title = "📸 Görsel İçerik Buffer'a eklendi (3 dk içinde X'te)"
+        img = fetch_hd_image_url(img_query)
+        title = f"📸 Görsel İçerik ({cat}) Buffer'a eklendi (3 dk içinde X'te)"
         err_title = "❌ Paylaşım Hatası:"
 
     question = generate_question(text)
