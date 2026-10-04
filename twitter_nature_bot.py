@@ -141,15 +141,19 @@ def get_season_context() -> str:
 def call_llms(prompt: str):
     generated = None
     if GEMINI_API_KEY:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-            res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=20)
-            if res.status_code == 200:
-                generated = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            else:
-                print(f"Gemini HTTP {res.status_code}: {res.text[:150]}")
-        except Exception as e:
-            print(f"Gemini Hatası: {e}")
+        for attempt in range(1, 4):
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+                res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=20)
+                if res.status_code == 200:
+                    generated = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    break
+                print(f"Gemini deneme {attempt}/3 HTTP {res.status_code}: {res.text[:150]}")
+                if res.status_code not in (429, 500, 502, 503, 504):
+                    break
+            except Exception as e:
+                print(f"Gemini Hatası (deneme {attempt}/3): {e}")
+            time.sleep(3 * attempt)
 
     if not generated and GROQ_API_KEY:
         try:
@@ -450,6 +454,10 @@ def check_telegram_updates():
                     send_interaction_reminder()
                 elif text in ["/yardim", "/yardım"]:
                     send_telegram_help()
+            if updates:
+                # İşlenen güncellemeleri onayla, bir sonraki çalışmada tekrar gelmesin
+                last_id = updates[-1]["update_id"]
+                requests.get(url, params={"offset": last_id + 1}, timeout=5)
     except Exception as e:
         print(f"Telegram komut okuma hatası: {e}")
 
