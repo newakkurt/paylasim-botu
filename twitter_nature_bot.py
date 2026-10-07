@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import random
@@ -39,6 +40,13 @@ BUFFER_API_KEY = os.getenv("BUFFER_API_KEY")
 BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
 BUFFER_URL = "https://api.buffer.com"
 
+# OPSİYONEL ve ÜCRETLİ: X API ile otomatik cevap. Anahtarları girmezsen hiç çalışmaz.
+# (Ücretsiz alternatif: /cevap komutu veya --suggest, aşağıda.)
+X_API_KEY = os.getenv("X_API_KEY")
+X_API_SECRET = os.getenv("X_API_SECRET")
+X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
+X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
+
 # Paylaşımdan kaç saniye sonra etkileşim hatırlatması gitsin (varsayılan 960 sn = 16 dk)
 ENGAGE_DELAY_SEC = _env_int("ENGAGE_DELAY_SEC", 960)
 # SKIP_WAIT=1 -> bekleme ve hatırlatma tamamen atlanır (test / manuel çalıştırma için)
@@ -50,12 +58,34 @@ ENABLE_TELEGRAM_POLL = _env_flag("ENABLE_TELEGRAM_POLL")
 # Varsayılan KAPALI: hava durumu zaten weather_bot.py / "/hava" komutuyla paylaşılıyor.
 NATURE_MORNING_WEATHER = _env_flag("NATURE_MORNING_WEATHER")
 
+# POST_MODE: auto | series | random | quiz
+#   auto   = 16:00 öncesi günün serisi; 16:00 sonrası Salı/Perşembe/Cumartesi quiz, diğer günler
+#            eski usul rastgele konu
+#   random = eski davranış (rastgele konu, hiçbir şey değişmedi)
+POST_MODE = (os.getenv("POST_MODE") or "auto").strip().lower()
+# Tekrar kontrolü HER ZAMAN açık. Aşağıdaki iki limit varsayılan KAPALI (0), istersen aç.
+DAILY_MAX_POSTS = _env_int("DAILY_MAX_POSTS", 0)  # günlük en fazla paylaşım (0 = sınırsız)
+MIN_GAP_MIN = _env_int("MIN_GAP_MIN", 0)          # iki paylaşım arası en az dakika (0 = kapalı)
+# Quiz cevabı kaç dakika sonra ayrı tweet olarak yayınlansın
+QUIZ_ANSWER_DELAY_MIN = _env_int("QUIZ_ANSWER_DELAY_MIN", 240)
+# Ücretli X API oto cevap: tek çalışmada en fazla kaç yanıt
+AUTO_REPLY_MAX = _env_int("AUTO_REPLY_MAX", 5)
+FORCE = _env_flag("FORCE")  # FORCE=1 -> limit kontrolünü atla (test)
+# Seri/quiz tweetlerinde en fazla kaç hashtag (eski usul tweetler 5 hashtag'le devam eder)
+MAX_HASHTAGS = _env_int("MAX_HASHTAGS", 3)
+
 TZ = ZoneInfo("Europe/Istanbul")
 X_LIMIT = 280
+STATE_PATH = os.getenv("STATE_PATH") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "bot_state.json"
+)
 
 # --- HASHTAG GARANTİSİ VE ETKİLEŞİM HEDEFLERİ ---
 DEFAULT_HASHTAGS = ["#Nature", "#Wildlife", "#Earth", "#NaturePhotography", "#Environment"]
 TARGET_ACCOUNTS = ["NatGeo", "BBCEarth", "EarthPix", "ourplanet", "Discovery"]
+
+# Bio için önerilen satır (X'teki "Otomasyon" etiketi elle açılır)
+BIO_SUGGESTION = "Daily nature facts & quizzes 🌿 | 🤖 Automated account"
 
 
 def ensure_hashtags(text: str) -> str:
@@ -64,6 +94,19 @@ def ensure_hashtags(text: str) -> str:
         missing = [tag for tag in DEFAULT_HASHTAGS if tag not in found_tags]
         text += " " + " ".join(missing[: 5 - len(found_tags)])
     return text.strip()
+
+
+def limit_hashtags(text: str, extra=None, max_tags: int = None) -> str:
+    """Seri/quiz tweetleri için: hashtag sayısını sınırlar, hiç yoksa extra'dan ekler."""
+    max_tags = max_tags or MAX_HASHTAGS
+    tags = re.findall(r"#\w+", text)
+    body = re.sub(r"\s*#\w+", "", text).strip()
+    keep = []
+    for t in tags + list(extra or []):
+        if t.lower() not in [k.lower() for k in keep]:
+            keep.append(t)
+    keep = keep[:max_tags]
+    return (body + " " + " ".join(keep)).strip()
 
 
 def x_length(text: str) -> int:
@@ -84,6 +127,73 @@ def fit_for_x(text: str) -> str:
     return text
 
 
+# ============================================================
+#  DURUM DOSYASI (tekrar önleme, günlük limit, son konular)
+# ============================================================
+def load_state() -> dict:
+    try:
+        with open(STATE_PATH, encoding="utf-8") as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        st = {}
+    st.setdefault("hashes", [])
+    st.setdefault("posts", [])
+    st.setdefault("replied_ids", [])
+    st.setdefault("recent_texts", [])
+    st.setdefault("since_id", None)
+    return st
+
+
+def save_state(st: dict):
+    st["hashes"] = st["hashes"][-300:]
+    st["posts"] = st["posts"][-100:]
+    st["replied_ids"] = st["replied_ids"][-500:]
+    st["recent_texts"] = st["recent_texts"][-10:]
+    try:
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False)
+    except OSError as e:
+        print(f"Durum dosyası yazılamadı: {e}")
+
+
+def text_hash(text: str) -> str:
+    core = re.sub(r"#\w+", "", text.lower())
+    core = re.sub(r"[^a-z0-9]+", " ", core).strip()
+    return hashlib.sha1(core.encode("utf-8")).hexdigest()[:16]
+
+
+def is_duplicate(st: dict, text: str) -> bool:
+    return text_hash(text) in st["hashes"]
+
+
+def posting_allowed(st: dict):
+    """(izin, sebep). Limitler 0 ise (varsayılan) her zaman izin verir."""
+    if FORCE or (DAILY_MAX_POSTS <= 0 and MIN_GAP_MIN <= 0):
+        return True, "OK"
+    now = datetime.now(TZ)
+    times = []
+    for s in st["posts"]:
+        try:
+            times.append(datetime.fromisoformat(s))
+        except ValueError:
+            pass
+    if DAILY_MAX_POSTS > 0:
+        today = [t for t in times if t.astimezone(TZ).date() == now.date()]
+        if len(today) >= DAILY_MAX_POSTS:
+            return False, f"Günlük limit doldu ({DAILY_MAX_POSTS})."
+    if MIN_GAP_MIN > 0 and times:
+        gap = (now - max(times)).total_seconds() / 60
+        if gap < MIN_GAP_MIN:
+            return False, f"Son paylaşımdan bu yana {int(gap)} dk geçti (min {MIN_GAP_MIN})."
+    return True, "OK"
+
+
+def record_post(st: dict, text: str):
+    st["hashes"].append(text_hash(text))
+    st["posts"].append(datetime.now(TZ).isoformat())
+    save_state(st)
+
+
 # --- YEDEK İÇERİK HAVUZU ---
 FALLBACK_NOTES = [
     "Did you know? Trees in a forest can communicate and share nutrients through an underground fungal network. #NatureFacts #ForestLife #Trees #MotherNature #EcoSystem",
@@ -91,6 +201,18 @@ FALLBACK_NOTES = [
     "Honey never spoils. Archeologists have found 3,000-year-old honey in ancient Egyptian tombs. #NatureMagic #Honey #History #AncientEgypt #FoodFacts",
     "A single full-grown oak tree can absorb up to 50 gallons of water per day. #Trees #Environment #Forests #SaveTrees #GreenPlanet",
     "Clouds look light and fluffy, but an average cumulus cloud weighs about 1.1 million pounds! #Weather #Nature #Atmosphere #Sky #NatureFacts",
+]
+
+# Kategori bilgili yedekler (görsel-metin uyumu için): (kategori, metin)
+FALLBACK_BY_CAT = [
+    ("trees", "Trees in a forest can share nutrients through an underground fungal network."),
+    ("plants", "Bananas are naturally slightly radioactive because they contain potassium."),
+    ("insects", "Honey never spoils. Archaeologists found 3,000-year-old honey in Egyptian tombs."),
+    ("trees", "A single full-grown oak tree can absorb dozens of gallons of water per day."),
+    ("weather", "An average cumulus cloud can weigh about a million pounds, yet it floats."),
+    ("ocean", "An octopus has three hearts and blue blood."),
+    ("animals", "Elephants can recognise themselves in a mirror, a sign of self-awareness."),
+    ("birds", "Hummingbirds are the only birds that can fly backwards."),
 ]
 
 
@@ -128,6 +250,17 @@ TOPICS = {
 TOPIC_POOL = ["animals", "animals", "trees", "trees", "ocean", "ocean",
               "birds", "water", "plants", "insects", "earth", "weather", "fungi"]
 
+# --- HAFTALIK KONU SERİSİ (0=Pazartesi ... 6=Pazar) ---
+SERIES = {
+    0: {"name": "Marine Monday", "cat": "ocean", "emoji": "🌊", "tag": "#MarineMonday"},
+    1: {"name": "Tree Tuesday", "cat": "trees", "emoji": "🌳", "tag": "#TreeTuesday"},
+    2: {"name": "Wild Wednesday", "cat": "animals", "emoji": "🐾", "tag": "#WildWednesday"},
+    3: {"name": "Feathered Thursday", "cat": "birds", "emoji": "🐦", "tag": "#BirdThursday"},
+    4: {"name": "Flora Friday", "cat": "plants", "emoji": "🌸", "tag": "#FloraFriday"},
+    5: {"name": "Sky Saturday", "cat": "weather", "emoji": "⛅", "tag": "#SkySaturday"},
+    6: {"name": "Small World Sunday", "cat": "insects", "emoji": "🐝", "tag": "#SmallWorldSunday"},
+}
+
 
 def load_fact_pool():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nature_facts.txt")
@@ -154,6 +287,23 @@ def pick_pool_note() -> str:
     cat, fact = pool[idx]
     tags = " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
     return ensure_hashtags(f"{fact} {tags}")
+
+
+def pick_pool_note_cat(want_cat=None, st=None):
+    """(kategori, düz metin) döner. İstenen kategoriden, daha önce kullanılmamış bir bilgi seçer.
+    LLM çökünce konu ile görselin uyuşmaması sorununu çözer."""
+    pool = load_fact_pool()
+    used = set(st["hashes"]) if st else set()
+    if pool:
+        cands = [p for p in pool if (not want_cat or p[0] == want_cat)] or pool
+        random.shuffle(cands)
+        for cat, fact in cands:
+            if text_hash(fact) not in used:
+                return cat, fact
+        return cands[0]
+    cands = [n for n in FALLBACK_BY_CAT if (not want_cat or n[0] == want_cat)] or FALLBACK_BY_CAT
+    fresh = [n for n in cands if text_hash(n[1]) not in used]
+    return random.choice(fresh or cands)
 
 
 def notify_telegram(message_text: str):
@@ -183,13 +333,20 @@ def get_season_context() -> str:
     return "Autumn (golden leaves, misty mornings)"
 
 
-def call_llms(prompt: str):
+def call_llms(prompt: str, temperature: float = 0.7):
     generated = None
     if GEMINI_API_KEY:
         for attempt in range(1, 4):
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-                res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=20)
+                res = requests.post(
+                    url,
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": temperature},
+                    },
+                    timeout=20,
+                )
                 if res.status_code == 200:
                     generated = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
                     break
@@ -207,7 +364,7 @@ def call_llms(prompt: str):
             payload = {
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
+                "temperature": temperature,
             }
             res = requests.post(url, headers=headers, json=payload, timeout=20)
             if res.status_code == 200:
@@ -225,7 +382,7 @@ def call_llms(prompt: str):
                 json={
                     "model": OPENROUTER_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7,
+                    "temperature": temperature,
                 },
                 timeout=30,
             )
@@ -245,6 +402,140 @@ def generate_ai_text(prompt: str) -> str:
     return fit_for_x(ensure_hashtags(generated))
 
 
+def clean_llm_text(s: str) -> str:
+    s = s.strip().strip('"').strip()
+    s = re.sub(r"^```(?:json)?|```$", "", s, flags=re.M).strip()
+    return s
+
+
+# ============================================================
+#  ESKİ USUL: RASTGELE KONU (davranış aynı; sadece LLM çökünce konu-görsel uyumu düzeltildi)
+# ============================================================
+def generate_random_tweet(cat: str, st: dict):
+    """(metin, kategori) döner."""
+    ctx = get_season_context()
+    topic, _ = TOPICS[cat]
+    tags = " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
+    prompt = (
+        f"Write an engaging English tweet containing ONE surprising, true and well-established fact about {topic}. "
+        "Only state facts you are sure about and do not invent numbers. "
+        f"Seasonal context (use only if it fits naturally): {ctx}. "
+        "Max 230 characters in total including hashtags. "
+        f"End with these hashtags plus 1-2 more relevant ones: {tags}. "
+        "Output only the tweet text, no quotes, no preamble."
+    )
+    raw = call_llms(prompt)
+    if raw:
+        text = raw.strip().strip('"').strip()
+    else:
+        cat2, fact = pick_pool_note_cat(cat, st)
+        cat = cat2 if cat2 in TOPICS else cat
+        text = f"{fact} " + " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
+    return fit_for_x(ensure_hashtags(text)), cat
+
+
+# ============================================================
+#  1) KONU SERİSİ
+# ============================================================
+def generate_series_tweet(cat: str, series: dict, st: dict):
+    """(metin, kategori) döner."""
+    topic, _ = TOPICS[cat]
+    tags = CATEGORY_TAGS.get(cat, ["#Nature"])
+    recent = " | ".join(st.get("recent_texts", [])[-5:])
+    prompt = (
+        f"Write an engaging English tweet for the weekly series '{series['name']}'. "
+        f"It must contain ONE surprising, true and well-established fact about {topic}. "
+        "Only state facts you are sure about and do not invent numbers. "
+        f"Start the tweet with the emoji {series['emoji']}. "
+        "Max 220 characters including hashtags. "
+        f"End with exactly these hashtags: {series['tag']} {tags[0]}. "
+        + (f"Do NOT repeat any of these earlier topics: {recent}. " if recent else "")
+        + "Output only the tweet text, no quotes, no preamble."
+    )
+    raw = call_llms(prompt)
+    if raw:
+        text = clean_llm_text(raw)
+    else:
+        cat2, fact = pick_pool_note_cat(cat, st)
+        cat = cat2 if cat2 in TOPICS else cat
+        text = f"{series['emoji']} {fact}"
+    text = limit_hashtags(text, extra=[series["tag"], tags[0]])
+    return fit_for_x(text), cat
+
+
+# ============================================================
+#  2) QUIZ (ücretsiz: soru + şıklar tweet'te, cevap birkaç saat sonra ayrı tweet)
+# ============================================================
+QUIZ_FALLBACK = [
+    {"cat": "ocean", "q": "Which animal has three hearts?",
+     "options": ["Octopus", "Dolphin", "Sea turtle"], "answer": 0,
+     "explain": "An octopus has three hearts: two pump blood to the gills, one to the body."},
+    {"cat": "animals", "q": "Which is the fastest land animal?",
+     "options": ["Lion", "Cheetah", "Pronghorn"], "answer": 1,
+     "explain": "The cheetah can sprint at roughly 100 km/h in short bursts."},
+    {"cat": "trees", "q": "Which tree species is the tallest in the world?",
+     "options": ["Giant sequoia", "Coast redwood", "Douglas fir"], "answer": 1,
+     "explain": "Coast redwoods can exceed 110 metres, the tallest trees on Earth."},
+    {"cat": "birds", "q": "Which bird can fly backwards?",
+     "options": ["Hummingbird", "Eagle", "Swallow"], "answer": 0,
+     "explain": "Hummingbirds can hover and even fly backwards thanks to their wing rotation."},
+]
+
+LETTERS = ["A", "B", "C"]
+
+
+def generate_quiz(st: dict):
+    cat = random.choice(list(TOPICS.keys()))
+    topic, _ = TOPICS[cat]
+    prompt = (
+        f"Create ONE multiple-choice quiz question about {topic}. "
+        "Only use facts you are 100% sure about. Exactly 3 short options, exactly one correct. "
+        "Return ONLY valid JSON, no markdown, with this shape: "
+        '{"q": "question under 90 characters", "options": ["a", "b", "c"], '
+        '"answer": 0, "explain": "one short sentence under 110 characters"}. '
+        "answer is the 0-based index of the correct option. Randomize the position of the correct option."
+    )
+    raw = call_llms(prompt, temperature=0.9)
+    if raw:
+        try:
+            m = re.search(r"\{.*\}", clean_llm_text(raw), flags=re.S)
+            data = json.loads(m.group(0))
+            opts = [str(o).strip() for o in data["options"]][:3]
+            ans = int(data["answer"])
+            q = str(data["q"]).strip()
+            explain = str(data["explain"]).strip()
+            if len(opts) == 3 and 0 <= ans < 3 and q.endswith("?") and explain:
+                return {"cat": cat, "q": q, "options": opts, "answer": ans, "explain": explain}
+        except Exception as e:
+            print(f"Quiz JSON ayrıştırılamadı: {e}")
+    pool = [x for x in QUIZ_FALLBACK if text_hash(x["q"]) not in st["hashes"]] or QUIZ_FALLBACK
+    return dict(random.choice(pool))
+
+
+def format_quiz_tweet(quiz: dict) -> str:
+    lines = [f"🧠 Nature Quiz: {quiz['q']}", ""]
+    for i, opt in enumerate(quiz["options"]):
+        lines.append(f"{LETTERS[i]}) {opt}")
+    lines += ["", "Reply with your answer! Solution later today 👇"]
+    tags = CATEGORY_TAGS.get(quiz["cat"], ["#Nature"])
+    text = "\n".join(lines) + " #NatureQuiz " + tags[0]
+    return fit_for_x(limit_hashtags(text))
+
+
+def format_quiz_answer(quiz: dict) -> str:
+    letter = LETTERS[quiz["answer"]]
+    text = (
+        f"✅ Quiz answer: {letter}) {quiz['options'][quiz['answer']]}\n\n"
+        f"{quiz['explain']}\n\n"
+        f"(Q: {quiz['q']})"
+    )
+    tags = CATEGORY_TAGS.get(quiz["cat"], ["#Nature"])
+    return fit_for_x(limit_hashtags(text + " #NatureQuiz", extra=[tags[0]]))
+
+
+# ============================================================
+#  SORU (tweetin altına otomatik yorum)
+# ============================================================
 QUESTION_BANK = {
     "trees": [
         "Which tree would you most like to stand beneath: a giant redwood or an ancient bristlecone pine? 🌲",
@@ -288,6 +579,7 @@ def generate_question(tweet_text: str) -> str:
     bank = QUESTION_BANK.get(guess_category(tweet_text)) or QUESTION_BANK["generic"]
     return random.choice(bank)
 
+
 # --- MEDYA ÇEKME İŞLEMLERİ (VİDEO VE RESİM) ---
 
 def fetch_hd_video_url(query: str = "nature landscape") -> str:
@@ -312,6 +604,7 @@ def fetch_hd_video_url(query: str = "nature landscape") -> str:
         except Exception as e:
             print(f"Pexels Video hatası: {e}")
     return None
+
 
 def fetch_hd_image_url(query: str = "nature landscape"):
     if UNSPLASH_ACCESS_KEY:
@@ -349,6 +642,14 @@ def fetch_hd_image_url(query: str = "nature landscape"):
             print(f"Pexels hatası: {e}")
 
     return None
+
+
+def fetch_media(query: str):
+    """(url, is_video). Önce video aranır, bulunamazsa resme geçilir."""
+    url = fetch_hd_video_url(query)
+    if url:
+        return url, True
+    return fetch_hd_image_url(query), False
 
 
 def get_weather_info() -> str:
@@ -401,27 +702,23 @@ def get_x_channel_id() -> str:
     raise RuntimeError(f"Buffer'da bağlı X kanalı bulunamadı. Görülen kanallar: {seen or 'hiç'}")
 
 
-def create_buffer_post(channel_id: str, text: str, image_url=None, reply=None) -> str:
-    due = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    assets = ""
-def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=False, reply=None) -> str:
-    due = (datetime.now(timezone.utc) + timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=False,
+                       reply=None, delay_min: int = 3) -> str:
+    due = (datetime.now(timezone.utc) + timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     assets = ""
     metadata = ""
 
-    # BU SATIR EKLENDİ: Video ise GraphQL nesnesi 'video', resim ise 'image' olur
+    # Video ise GraphQL nesnesi 'video', resim ise 'image' olur
     media_asset_key = "video" if is_video else "image"
 
     if reply:
         first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
         if media_url:
-            # BU SATIR GÜNCELLENDİ: media_asset_key kullanılıyor
             first += f" assets: [{{ {media_asset_key}: {{ url: %s }} }}]" % json.dumps(media_url)
         first += " }"
         second = "{ text: %s }" % json.dumps(reply, ensure_ascii=False)
         metadata = "metadata: { twitter: { thread: [ %s %s ] } }" % (first, second)
     elif media_url:
-        # BU SATIR GÜNCELLENDİ: media_asset_key kullanılıyor
         assets = f"assets: [{{ {media_asset_key}: {{ url: %s }} }}]" % json.dumps(media_url)
 
     mutation = """
@@ -445,41 +742,9 @@ def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=Fals
     if "post" in result and result["post"]:
         return result["post"]["id"]
     raise RuntimeError(result.get("message", "Bilinmeyen Buffer hatası"))
-    
-    metadata = ""
-    if reply:
-        first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
-        if image_url:
-            first += " assets: [{ image: { url: %s } }]" % json.dumps(image_url)
-        first += " }"
-        second = "{ text: %s }" % json.dumps(reply, ensure_ascii=False)
-        metadata = "metadata: { twitter: { thread: [ %s %s ] } }" % (first, second)
-    elif image_url:
-        assets = "assets: [{ image: { url: %s } }]" % json.dumps(image_url)
-    mutation = """
-    mutation {
-      createPost(input: {
-        text: %s
-        channelId: %s
-        schedulingType: automatic
-        mode: customScheduled
-        dueAt: "%s"
-        %s
-        %s
-      }) {
-        ... on PostActionSuccess { post { id } }
-        ... on MutationError { message }
-      }
-    }
-    """ % (json.dumps(text, ensure_ascii=False), json.dumps(channel_id), due, assets, metadata)
-
-    result = gql(mutation)["createPost"]
-    if "post" in result and result["post"]:
-        return result["post"]["id"]
-    raise RuntimeError(result.get("message", "Bilinmeyen Buffer hatası"))
 
 
-def post_to_x(text: str, media_url=None, is_video=False, reply=None): # is_video eklendi
+def post_to_x(text: str, media_url=None, is_video=False, reply=None, delay_min: int = 3):
     if not BUFFER_API_KEY:
         return False, "BUFFER_API_KEY eksik.", False
     try:
@@ -494,9 +759,9 @@ def post_to_x(text: str, media_url=None, is_video=False, reply=None): # is_video
         last_error = None
         for med, rp in attempts:
             try:
-                # BU SATIR GÜNCELLENDİ: is_video parametresi aktarılıyor
-                post_id = create_buffer_post(channel_id, text, med, is_video=is_video, reply=rp)
-                print(f"✅ Buffer'a eklendi. Post ID: {post_id} | Video: {is_video} | yorum: {bool(rp)}")
+                post_id = create_buffer_post(channel_id, text, med, is_video=is_video and bool(med),
+                                             reply=rp, delay_min=delay_min)
+                print(f"✅ Buffer'a eklendi. Post ID: {post_id} | Video: {is_video and bool(med)} | yorum: {bool(rp)}")
                 return True, "OK", bool(rp)
             except RuntimeError as e:
                 print(f"Deneme başarısız: {e}")
@@ -504,6 +769,125 @@ def post_to_x(text: str, media_url=None, is_video=False, reply=None): # is_video
         raise last_error
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:200]}", False
+
+
+# ============================================================
+#  3) CEVAP YARDIMCISI
+#  ÜCRETSİZ yol : /cevap <gelen yorum> (Telegram) veya  python nature_bot.py --suggest "yorum"
+#                 -> hazır cevap üretir, sen tek dokunuşla yapıştırırsın.
+#  ÜCRETLİ yol  : X API anahtarları girilirse auto_reply_job() gelen yanıtlara kendisi cevap verir.
+# ============================================================
+def generate_reply(user_text: str, original_text: str) -> str:
+    prompt = (
+        "You run a friendly nature-facts account. Someone replied to our tweet.\n"
+        f"Our tweet: {original_text[:200]}\n"
+        f"Their reply: {user_text[:200]}\n\n"
+        "Write ONE warm, specific reply (max 150 characters) that responds to what they actually said. "
+        "If they answered a quiz, say whether it's right only if you are sure, otherwise just thank them. "
+        "No hashtags, no quotation marks, no links. Output only the reply."
+    )
+    r = call_llms(prompt, temperature=0.9)
+    if r:
+        lines = clean_llm_text(r).splitlines()
+        r = re.sub(r"#\w+", "", lines[0]).strip() if lines else ""
+        if 5 <= len(r) <= 200:
+            return fit_for_x(r)
+    return random.choice([
+        "Thanks for joining in! 🌿",
+        "Great answer, thanks for sharing! 🌍",
+        "Love hearing your take on this! 🍃",
+        "Nature never stops surprising us, right? ✨",
+    ])
+
+
+def send_reply_suggestion(user_text: str, original_text: str = "a nature facts tweet") -> str:
+    reply = generate_reply(user_text, original_text)
+    safe = reply.replace("`", "'")
+    notify_telegram(
+        "↩️ *Önerilen cevap:*\n"
+        f"`{safe}`\n\n"
+        "🔗 [Gelen yanıtlar](https://x.com/notifications/mentions)"
+    )
+    return reply
+
+
+def get_tweepy_client():
+    if not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET]):
+        return None
+    try:
+        import tweepy  # pip install tweepy
+    except ImportError:
+        print("tweepy kurulu değil: pip install tweepy")
+        return None
+    return tweepy.Client(
+        consumer_key=X_API_KEY,
+        consumer_secret=X_API_SECRET,
+        access_token=X_ACCESS_TOKEN,
+        access_token_secret=X_ACCESS_SECRET,
+        wait_on_rate_limit=False,
+    )
+
+
+def auto_reply_job() -> int:
+    """ÜCRETLİ X API gerektirir; anahtar yoksa sessizce atlanır."""
+    client = get_tweepy_client()
+    if client is None:
+        print("↩️ Otomatik cevap atlandı (X API anahtarı yok). Ücretsiz yol: /cevap veya --suggest.")
+        return 0
+
+    st = load_state()
+    try:
+        me = client.get_me()
+        my_id = me.data.id
+        resp = client.get_users_mentions(
+            id=my_id,
+            since_id=st.get("since_id"),
+            max_results=20,
+            expansions=["author_id", "referenced_tweets.id"],
+            tweet_fields=["author_id", "conversation_id", "text"],
+        )
+    except Exception as e:
+        print(f"Oto cevap: mention okunamadı: {e}")
+        notify_telegram(f"⚠️ Oto cevap çalışmadı (X API): {str(e)[:200]}")
+        return 0
+
+    mentions = list(resp.data or [])
+    if not mentions:
+        return 0
+    includes = {t.id: t for t in (resp.includes.get("tweets", []) if resp.includes else [])}
+
+    st["since_id"] = str(max(int(t.id) for t in mentions))
+    replied_authors = set()
+    done = 0
+    for t in sorted(mentions, key=lambda x: int(x.id)):
+        if done >= AUTO_REPLY_MAX:
+            break
+        if str(t.id) in st["replied_ids"] or t.author_id == my_id:
+            continue
+        if t.author_id in replied_authors:
+            continue
+        original_text = ""
+        for ref in (t.referenced_tweets or []):
+            if ref.type == "replied_to" and ref.id in includes:
+                original_text = includes[ref.id].text
+        if not original_text:
+            continue
+        if re.search(r"https?://|follow back|f4f|dm me|giveaway", t.text, flags=re.I):
+            continue
+        reply = generate_reply(t.text, original_text)
+        try:
+            client.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
+            st["replied_ids"].append(str(t.id))
+            replied_authors.add(t.author_id)
+            done += 1
+            print(f"↩️ Cevaplandı: {t.id} -> {reply}")
+            time.sleep(random.randint(20, 60))
+        except Exception as e:
+            print(f"Cevap atılamadı {t.id}: {e}")
+    save_state(st)
+    if done:
+        notify_telegram(f"↩️ {done} yanıta otomatik cevap verildi.")
+    return done
 
 
 # --- TELEGRAM KOMUT HANDLERLARI ---
@@ -518,9 +902,15 @@ def send_telegram_help():
         "⚡ *Mevcut Komutlar:*\n"
         "• `/paylas` : Hemen bir tweet hazırlar ve Buffer'a ekler.\n"
         "• `/etkilesim` : Canlı linkler, tek dokunuşla takip bağlantıları ve hazır akıllı yorum üretir.\n"
+        "• `/cevap <gelen yorum>` : Gelen yoruma hazır cevap önerir.\n"
         "• `/yardim` : Bu yardım rehberini gösterir.\n\n"
+        "🗓️ *Haftalık seri:* Pzt Marine Monday, Sal Tree Tuesday, Çar Wild Wednesday, "
+        "Per Feathered Thursday, Cum Flora Friday, Cmt Sky Saturday, Paz Small World Sunday.\n"
+        "🧠 *Quiz:* Sal/Per/Cmt akşamı; cevap birkaç saat sonra ayrı tweet olarak çıkar.\n\n"
         "🛡️ *Neden API Kredisi Harcanmaz?*\n"
-        "Paylaşımlar Buffer API üzerinden yapıldığı için hesabın X API sınırlarına takılmaz ve tamamen ücretsizdir."
+        "Paylaşımlar Buffer API üzerinden yapıldığı için hesabın X API sınırlarına takılmaz ve tamamen ücretsizdir.\n\n"
+        "🤖 *Hesabı otomatik olarak etiketle:* X > Ayarlar > Hesabın > Hesap bilgileri > Otomasyon.\n"
+        f"Bio önerisi: `{BIO_SUGGESTION}`"
     )
     notify_telegram(help_text)
 
@@ -547,13 +937,15 @@ def send_interaction_reminder(tweet_text: str = None):
         "_(İlk 2-3 tweet'i beğen ve yukarıdaki yorumu yap)_\n\n"
         "2️⃣ *Tek Dokunuşla Takip (onay ekranı açılır):*\n"
         f"{follow_lines}\n\n"
+        "3️⃣ *Sana gelen yanıtlar:*\n🔗 [Bildirimler](https://x.com/notifications/mentions)\n"
+        "_(Yanıt varsa `/cevap yorum metni` yaz, hazır cevap göndereyim)_\n\n"
         "⏱️ _Süre: ~30 saniye. Beğeni ve takip elle yapıldığı için otomasyon kaynaklı hesap riski yok._"
     )
     notify_telegram(reminder_msg)
 
 
 def check_telegram_updates():
-    """OPSİYONEL (ENABLE_TELEGRAM_POLL=1): script çalışırken bekleyen /etkilesim ve /yardim komutlarını işler."""
+    """OPSİYONEL (ENABLE_TELEGRAM_POLL=1): script çalışırken bekleyen /etkilesim, /yardim ve /cevap komutlarını işler."""
     if not TELEGRAM_BOT_TOKEN:
         return
     try:
@@ -563,11 +955,16 @@ def check_telegram_updates():
             updates = res.json().get("result", [])
             for update in updates:
                 msg = update.get("message", {})
-                text = msg.get("text", "").strip().lower()
+                raw = msg.get("text", "").strip()
+                text = raw.lower()
                 if text in ["/etkilesim", "/etkileşim"]:
                     send_interaction_reminder()
                 elif text in ["/yardim", "/yardım"]:
                     send_telegram_help()
+                elif text.startswith("/cevap"):
+                    body = raw[len("/cevap"):].strip()
+                    if body:
+                        send_reply_suggestion(body)
             if updates:
                 # İşlenen güncellemeleri onayla, bir sonraki çalışmada tekrar gelmesin
                 last_id = updates[-1]["update_id"]
@@ -576,53 +973,109 @@ def check_telegram_updates():
         print(f"Telegram komut okuma hatası: {e}")
 
 
+# ============================================================
+#  ANA İŞ
+# ============================================================
+def choose_mode(now: datetime) -> str:
+    if POST_MODE in ("series", "quiz", "random"):
+        return POST_MODE
+    if now.hour >= 16:
+        # Salı, Perşembe, Cumartesi akşamı quiz; diğer akşamlar eski usul rastgele konu
+        return "quiz" if now.weekday() in (1, 3, 5) else "random"
+    return "series"
+
+
+def build_content(mode: str, st: dict, now: datetime) -> dict:
+    """Bir paylaşımın metnini hazırlar. Medya, metin kabul edildikten sonra çekilir."""
+    c = {"answer_post": None, "reply_q": None, "cat": None}
+    if mode == "weather":
+        c["text"] = get_weather_info()
+        c["query"] = "morning sunrise nature"
+        c["title"] = "☀️ Sabah Hava Durumu Buffer'a eklendi"
+        c["err_title"] = "❌ Hava Durumu Hata:"
+    elif mode == "quiz":
+        quiz = generate_quiz(st)
+        c["text"] = format_quiz_tweet(quiz)
+        c["answer_post"] = format_quiz_answer(quiz)
+        c["cat"] = quiz["cat"]
+        c["query"] = TOPICS.get(quiz["cat"], TOPICS["animals"])[1]
+        c["title"] = f"🧠 Quiz ({quiz['cat']}) Buffer'a eklendi"
+        c["err_title"] = "❌ Quiz Hatası:"
+    elif mode == "series":
+        series = SERIES[now.weekday()]
+        text, cat = generate_series_tweet(series["cat"], series, st)
+        c["text"], c["cat"] = text, cat
+        c["query"] = TOPICS[cat][1]
+        c["reply_q"] = generate_question(text)
+        c["title"] = f"{series['name']} ({cat}) Buffer'a eklendi"
+        c["err_title"] = "❌ Paylaşım Hatası:"
+    else:  # random = eski davranış
+        cat0 = random.choice(TOPIC_POOL)
+        text, cat = generate_random_tweet(cat0, st)
+        c["text"], c["cat"] = text, cat
+        c["query"] = TOPICS[cat][1]
+        c["reply_q"] = generate_question(text)
+        c["title"] = f"İçerik ({cat}) Buffer'a eklendi"
+        c["err_title"] = "❌ Paylaşım Hatası:"
+    return c
+
+
 def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
-    hour = datetime.now(TZ).hour
+    st = load_state()
+    ok, why = posting_allowed(st)
+    if not ok:
+        print(f"⏸️ Paylaşım atlandı: {why}")
+        return True  # hata değil, bilinçli atlama
 
+    now = datetime.now(TZ)
+    hour = now.hour
     if NATURE_MORNING_WEATHER and 7 <= hour < 10:
-        text = get_weather_info()
-        # BU SATIR GÜNCELLENDİ
-        media_url = fetch_hd_video_url("morning sunrise nature") or fetch_hd_image_url("morning sunrise nature")
-        is_video = True if media_url and ".mp4" in media_url.lower() else False
-        title = "☀️ Sabah Hava Durumu Buffer'a eklendi"
-        err_title = "❌ Hava Durumu Hata:"
+        mode = "weather"
     else:
-        ctx = get_season_context()
-        cat = random.choice(TOPIC_POOL)
-        topic, query = TOPICS[cat]
-        tags = " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
+        mode = choose_mode(now)
 
-        # BU BLOK EKLENDİ: Önce video aranır, bulunamazsa resme geçilir
-        media_url = fetch_hd_video_url(query)
-        is_video = True if media_url else False
+    # Aynı içerik daha önce atıldıysa en fazla 3 kez yeniden üret
+    content = None
+    for _ in range(3):
+        cand = build_content(mode, st, now)
+        if not is_duplicate(st, cand["text"]):
+            content = cand
+            break
+        print("🔁 Aynı içerik daha önce paylaşılmış, yenisi üretiliyor...")
+    if content is None:
+        print("⏸️ Üç denemede de tekrar eden içerik çıktı, bu tur atlandı.")
+        notify_telegram("⏸️ Tekrar eden içerik tespit edildi, bu tur paylaşım yapılmadı.")
+        return True
 
-        if not media_url:
-            media_url = fetch_hd_image_url(query)
-            is_video = False
+    text = content["text"]
+    question = content["reply_q"]
+    answer_post = content["answer_post"]
+    err_title = content["err_title"]
 
-        prompt = (
-            f"Write an engaging English tweet containing ONE surprising, true and well-established fact about {topic}. "
-            "Only state facts you are sure about and do not invent numbers. "
-            f"Seasonal context (use only if it fits naturally): {ctx}. "
-            "Max 230 characters in total including hashtags. "
-            f"End with these hashtags plus 1-2 more relevant ones: {tags}. "
-            "Output only the tweet text, no quotes, no preamble."
-        )
-        text = generate_ai_text(prompt)
-        
-        # BU SATIRLAR GÜNCELLENDİ
-        media_type = "🎥 Video" if is_video else "📸 Görsel"
-        title = f"{media_type} İçerik ({cat}) Buffer'a eklendi"
-        err_title = "❌ Paylaşım Hatası:"
+    # Medya, METNİN gerçek konusuna göre çekilir (görsel-metin uyumsuzluğunu önler)
+    media_url, is_video = fetch_media(content["query"])
+    media_type = "🎥 Video" if is_video else "📸 Görsel"
+    title = f"{media_type} {content['title']}"
 
-    question = generate_question(text)
-    # BU SATIR GÜNCELLENDİ: is_video iletiliyor
     success, reason, replied = post_to_x(text, media_url, is_video=is_video, reply=question)
 
     if success:
-        msg = f"{title}\n\n{text}\n\n💬 Yorum: {question}"
-        if not replied:
-            msg += "\n\n⚠️ Yorum eklenemedi, sadece ana tweet gitti (loga bak)."
+        st.setdefault("recent_texts", []).append(text[:60])
+        record_post(st, text)
+
+        msg = f"{title}\n\n{text}"
+        if question:
+            msg += f"\n\n💬 Yorum: {question}"
+            if not replied:
+                msg += "\n\n⚠️ Yorum eklenemedi, sadece ana tweet gitti (loga bak)."
+
+        # Quiz cevabı: birkaç saat sonra ayrı tweet olarak zamanlanır
+        if answer_post:
+            ok2, reason2, _ = post_to_x(answer_post, None, delay_min=QUIZ_ANSWER_DELAY_MIN)
+            if ok2:
+                msg += f"\n\n✅ Cevap tweeti {QUIZ_ANSWER_DELAY_MIN // 60} saat sonraya zamanlandı:\n{answer_post}"
+            else:
+                msg += f"\n\n⚠️ Cevap tweeti zamanlanamadı: {reason2}"
         notify_telegram(msg)
 
         if SKIP_WAIT or ENGAGE_DELAY_SEC <= 0:
@@ -648,4 +1101,22 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
 if __name__ == "__main__":
     if ENABLE_TELEGRAM_POLL:
         check_telegram_updates()
-    sys.exit(0 if run_job() else 1)
+
+    if "--suggest" in sys.argv:
+        # Ücretsiz cevap yardımcısı: python nature_bot.py --suggest "gelen yorum metni"
+        body = " ".join(sys.argv[sys.argv.index("--suggest") + 1:]).strip()
+        if body:
+            print(send_reply_suggestion(body))
+        sys.exit(0)
+
+    if "--reply" in sys.argv:
+        # Sadece ÜCRETLİ X API oto cevap modu
+        auto_reply_job()
+        sys.exit(0)
+
+    ok = run_job()
+    try:
+        auto_reply_job()  # X API anahtarı yoksa sessizce atlanır
+    except Exception as e:
+        print(f"Oto cevap hatası: {e}")
+    sys.exit(0 if ok else 1)
