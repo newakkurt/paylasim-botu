@@ -1,3 +1,4 @@
+import difflib
 import hashlib
 import json
 import os
@@ -74,6 +75,17 @@ FORCE = _env_flag("FORCE")  # FORCE=1 -> limit kontrolünü atla (test)
 # Seri/quiz tweetlerinde en fazla kaç hashtag (eski usul tweetler 5 hashtag'le devam eder)
 MAX_HASHTAGS = _env_int("MAX_HASHTAGS", 3)
 
+# --- İDDİA KONTROLÜ VE BENZERLİK ---
+# FACT_CHECK=0 -> kapatır. Varsayılan AÇIK: tweet paylaşılmadan önce ikinci bir model sayı/olgu iddialarını denetler.
+FACT_CHECK = (os.getenv("FACT_CHECK") or "1").strip().lower() not in ("0", "false", "no")
+# FACT_CHECK_STRICT=1 -> doğrulayıcı model hiç cevap veremezse paylaşım yapılmaz.
+# Varsayılan (0): doğrulanamazsa yine paylaşır ama Telegram'da uyarı düşer, bot kota hatasında durmaz.
+FACT_CHECK_STRICT = _env_flag("FACT_CHECK_STRICT")
+# Yeni tweet geçmiştekilerden bu yüzde veya daha fazla benziyorsa yeniden üretilir (0 = kapalı)
+SIMILARITY_PCT = _env_int("SIMILARITY_PCT", 60)
+# Şüpheli/tekrar/benzer çıkarsa en fazla kaç kez yeniden üretilsin
+MAX_ATTEMPTS = _env_int("MAX_ATTEMPTS", 4)
+
 TZ = ZoneInfo("Europe/Istanbul")
 X_LIMIT = 280
 STATE_PATH = os.getenv("STATE_PATH") or os.path.join(
@@ -140,12 +152,14 @@ def load_state() -> dict:
     st.setdefault("posts", [])
     st.setdefault("replied_ids", [])
     st.setdefault("recent_texts", [])
+    st.setdefault("history", [])  # paylaşılan tweetlerin tam metni (benzerlik kontrolü için)
     st.setdefault("since_id", None)
     return st
 
 
 def save_state(st: dict):
     st["hashes"] = st["hashes"][-300:]
+    st["history"] = st["history"][-200:]
     st["posts"] = st["posts"][-100:]
     st["replied_ids"] = st["replied_ids"][-500:]
     st["recent_texts"] = st["recent_texts"][-10:]
@@ -191,7 +205,68 @@ def posting_allowed(st: dict):
 def record_post(st: dict, text: str):
     st["hashes"].append(text_hash(text))
     st["posts"].append(datetime.now(TZ).isoformat())
+    st.setdefault("history", []).append({"text": text, "t": datetime.now(TZ).isoformat()})
     save_state(st)
+
+
+# ============================================================
+#  BENZERLİK KONTROLÜ (aynı konu/cümleyi başka kelimelerle tekrar atmayı engeller)
+# ============================================================
+_BOILER = re.compile(
+    r"nature quiz|reply with your answer|solution later today|quiz answer|\b[abc]\)", re.I
+)
+_STOP = {
+    "that", "this", "with", "from", "have", "which", "their", "than", "they", "when",
+    "into", "about", "more", "most", "after", "also", "only", "even", "over", "such",
+    "some", "each", "other", "while", "there", "these", "those", "years", "year",
+}
+
+
+def _core_text(text: str) -> str:
+    t = _BOILER.sub(" ", text.lower())
+    t = re.sub(r"#\w+", " ", t)
+    t = re.sub(r"[^a-z0-9 ]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def similarity(a: str, b: str) -> float:
+    """0..1 arası benzerlik: karakter dizisi oranı ile anlamlı kelime kesişiminin büyüğü."""
+    ca, cb = _core_text(a), _core_text(b)
+    if not ca or not cb:
+        return 0.0
+    ratio = difflib.SequenceMatcher(None, ca, cb).ratio()
+    wa = {w for w in ca.split() if len(w) > 3 and w not in _STOP}
+    wb = {w for w in cb.split() if len(w) > 3 and w not in _STOP}
+    jac = len(wa & wb) / len(wa | wb) if wa and wb else 0.0
+    return max(ratio, jac)
+
+
+def find_similar(st: dict, text: str):
+    """Eşik aşılırsa (oran, eşleşen_eski_metin) döner, aşılmazsa None."""
+    if SIMILARITY_PCT <= 0:
+        return None
+    best, best_txt = 0.0, None
+    for h in st.get("history", [])[-150:]:
+        old = h.get("text", "") if isinstance(h, dict) else str(h)
+        s = similarity(text, old)
+        if s > best:
+            best, best_txt = s, old
+    if best >= SIMILARITY_PCT / 100:
+        return best, best_txt
+    return None
+
+
+def avoid_clause(st: dict, n: int = 8) -> str:
+    """Prompt'a eklenir: model son paylaşımları baştan tekrar etmesin."""
+    items = []
+    for h in st.get("history", [])[-n:]:
+        old = h.get("text", "") if isinstance(h, dict) else str(h)
+        core = _core_text(old)[:70]
+        if core:
+            items.append(core)
+    if not items:
+        return ""
+    return "Do NOT repeat or paraphrase any of these recent posts: " + " | ".join(items) + ". "
 
 
 # --- YEDEK İÇERİK HAVUZU ---
@@ -409,6 +484,85 @@ def clean_llm_text(s: str) -> str:
 
 
 # ============================================================
+#  İDDİA KONTROLÜ (ikinci model, düşük sıcaklık)
+#  Üretici Gemini ise doğrulayıcı önce Groq'a gider; böylece model kendi uydurmasını onaylamaz.
+# ============================================================
+def _openai_style_chat(url: str, key: str, model: str, prompt: str, temperature: float, timeout: int):
+    try:
+        res = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": temperature},
+            timeout=timeout,
+        )
+        if res.status_code == 200:
+            return res.json()["choices"][0]["message"]["content"].strip()
+        print(f"Doğrulayıcı HTTP {res.status_code} ({model}): {res.text[:120]}")
+    except Exception as e:
+        print(f"Doğrulayıcı hatası ({model}): {e}")
+    return None
+
+
+def call_verifier(prompt: str):
+    out = None
+    if GROQ_API_KEY:
+        out = _openai_style_chat(
+            "https://api.groq.com/openai/v1/chat/completions", GROQ_API_KEY,
+            "llama-3.3-70b-versatile", prompt, 0.0, 20,
+        )
+    if not out and OPENROUTER_API_KEY:
+        out = _openai_style_chat(
+            "https://openrouter.ai/api/v1/chat/completions", OPENROUTER_API_KEY,
+            OPENROUTER_MODEL, prompt, 0.0, 30,
+        )
+    if not out and GEMINI_API_KEY:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            res = requests.post(
+                url,
+                json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.0}},
+                timeout=20,
+            )
+            if res.status_code == 200:
+                out = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                print(f"Doğrulayıcı Gemini HTTP {res.status_code}: {res.text[:120]}")
+        except Exception as e:
+            print(f"Doğrulayıcı Gemini hatası: {e}")
+    return out
+
+
+def fact_check(text: str):
+    """(durum, notlar). durum: 'ok' | 'suspicious' | 'unverified'."""
+    prompt = (
+        "You are a strict fact-checker for a nature-facts social media account. "
+        "Check every factual claim and every number or unit in the text below. "
+        "Answer 'suspicious' if ANY claim is wrong, exaggerated, outdated, disputed, or if a number "
+        "cannot be confirmed from well-established knowledge. "
+        "Answer 'ok' only if every claim is correct. "
+        "If the text is a quiz, also verify that the marked answer is the single correct option. "
+        "Do not judge style.\n\n"
+        f"TEXT:\n{text}\n\n"
+        'Return ONLY valid JSON, no markdown: {"verdict": "ok" or "suspicious", "issues": ["short issue"]}.'
+    )
+    raw = call_verifier(prompt)
+    if not raw:
+        return "unverified", ["Doğrulayıcı model cevap vermedi."]
+    try:
+        m = re.search(r"\{.*\}", clean_llm_text(raw), flags=re.S)
+        data = json.loads(m.group(0))
+        verdict = str(data.get("verdict", "")).strip().lower()
+        issues = [str(i)[:160] for i in (data.get("issues") or [])][:4]
+        if verdict == "ok":
+            return "ok", []
+        if verdict == "suspicious":
+            return "suspicious", issues or ["Şüpheli iddia (ayrıntı verilmedi)."]
+    except Exception as e:
+        print(f"Doğrulama cevabı ayrıştırılamadı: {e}")
+    return "unverified", ["Doğrulama cevabı okunamadı."]
+
+
+# ============================================================
 #  ESKİ USUL: RASTGELE KONU (davranış aynı; sadece LLM çökünce konu-görsel uyumu düzeltildi)
 # ============================================================
 def generate_random_tweet(cat: str, st: dict):
@@ -422,7 +576,8 @@ def generate_random_tweet(cat: str, st: dict):
         f"Seasonal context (use only if it fits naturally): {ctx}. "
         "Max 230 characters in total including hashtags. "
         f"End with these hashtags plus 1-2 more relevant ones: {tags}. "
-        "Output only the tweet text, no quotes, no preamble."
+        + avoid_clause(st)
+        + "Output only the tweet text, no quotes, no preamble."
     )
     raw = call_llms(prompt)
     if raw:
@@ -450,6 +605,7 @@ def generate_series_tweet(cat: str, series: dict, st: dict):
         "Max 220 characters including hashtags. "
         f"End with exactly these hashtags: {series['tag']} {tags[0]}. "
         + (f"Do NOT repeat any of these earlier topics: {recent}. " if recent else "")
+        + avoid_clause(st)
         + "Output only the tweet text, no quotes, no preamble."
     )
     raw = call_llms(prompt)
@@ -493,7 +649,8 @@ def generate_quiz(st: dict):
         "Return ONLY valid JSON, no markdown, with this shape: "
         '{"q": "question under 90 characters", "options": ["a", "b", "c"], '
         '"answer": 0, "explain": "one short sentence under 110 characters"}. '
-        "answer is the 0-based index of the correct option. Randomize the position of the correct option."
+        "answer is the 0-based index of the correct option. Randomize the position of the correct option. "
+        + avoid_clause(st)
     )
     raw = call_llms(prompt, temperature=0.9)
     if raw:
@@ -907,6 +1064,8 @@ def send_telegram_help():
         "🗓️ *Haftalık seri:* Pzt Marine Monday, Sal Tree Tuesday, Çar Wild Wednesday, "
         "Per Feathered Thursday, Cum Flora Friday, Cmt Sky Saturday, Paz Small World Sunday.\n"
         "🧠 *Quiz:* Sal/Per/Cmt akşamı; cevap birkaç saat sonra ayrı tweet olarak çıkar.\n\n"
+        "🔍 *İddia kontrolü:* Her tweet paylaşılmadan önce ikinci bir model sayı ve olgu iddialarını denetler; şüpheli çıkarsa paylaşılmaz, sana uyarı düşer.\n"
+        "♻️ *Tekrar engeli:* Geçmiş tweetlere benzeyen içerik atılmaz, yenisi üretilir.\n\n"
         "🛡️ *Neden API Kredisi Harcanmaz?*\n"
         "Paylaşımlar Buffer API üzerinden yapıldığı için hesabın X API sınırlarına takılmaz ve tamamen ücretsizdir.\n\n"
         "🤖 *Hesabı otomatik olarak etiketle:* X > Ayarlar > Hesabın > Hesap bilgileri > Otomasyon.\n"
@@ -987,7 +1146,7 @@ def choose_mode(now: datetime) -> str:
 
 def build_content(mode: str, st: dict, now: datetime) -> dict:
     """Bir paylaşımın metnini hazırlar. Medya, metin kabul edildikten sonra çekilir."""
-    c = {"answer_post": None, "reply_q": None, "cat": None}
+    c = {"answer_post": None, "reply_q": None, "cat": None, "check_text": None}
     if mode == "weather":
         c["text"] = get_weather_info()
         c["query"] = "morning sunrise nature"
@@ -997,6 +1156,12 @@ def build_content(mode: str, st: dict, now: datetime) -> dict:
         quiz = generate_quiz(st)
         c["text"] = format_quiz_tweet(quiz)
         c["answer_post"] = format_quiz_answer(quiz)
+        c["check_text"] = (
+            f"Quiz question: {quiz['q']}\n"
+            + "\n".join(f"{LETTERS[i]}) {o}" for i, o in enumerate(quiz["options"]))
+            + f"\nMarked correct answer: {LETTERS[quiz['answer']]}) {quiz['options'][quiz['answer']]}\n"
+            f"Explanation: {quiz['explain']}"
+        )
         c["cat"] = quiz["cat"]
         c["query"] = TOPICS.get(quiz["cat"], TOPICS["animals"])[1]
         c["title"] = f"🧠 Quiz ({quiz['cat']}) Buffer'a eklendi"
@@ -1005,6 +1170,7 @@ def build_content(mode: str, st: dict, now: datetime) -> dict:
         series = SERIES[now.weekday()]
         text, cat = generate_series_tweet(series["cat"], series, st)
         c["text"], c["cat"] = text, cat
+        c["check_text"] = text
         c["query"] = TOPICS[cat][1]
         c["reply_q"] = generate_question(text)
         c["title"] = f"{series['name']} ({cat}) Buffer'a eklendi"
@@ -1013,6 +1179,7 @@ def build_content(mode: str, st: dict, now: datetime) -> dict:
         cat0 = random.choice(TOPIC_POOL)
         text, cat = generate_random_tweet(cat0, st)
         c["text"], c["cat"] = text, cat
+        c["check_text"] = text
         c["query"] = TOPICS[cat][1]
         c["reply_q"] = generate_question(text)
         c["title"] = f"İçerik ({cat}) Buffer'a eklendi"
@@ -1034,17 +1201,44 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
     else:
         mode = choose_mode(now)
 
-    # Aynı içerik daha önce atıldıysa en fazla 3 kez yeniden üret
+    # Tekrar / benzer / şüpheli içerik çıkarsa en fazla MAX_ATTEMPTS kez yeniden üret
     content = None
-    for _ in range(3):
+    flagged = []  # (metin, sebepler)
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         cand = build_content(mode, st, now)
-        if not is_duplicate(st, cand["text"]):
-            content = cand
-            break
-        print("🔁 Aynı içerik daha önce paylaşılmış, yenisi üretiliyor...")
+        if is_duplicate(st, cand["text"]):
+            print(f"🔁 ({attempt}/{MAX_ATTEMPTS}) Aynı içerik daha önce paylaşılmış, yenisi üretiliyor...")
+            continue
+        sim = find_similar(st, cand["text"])
+        if sim:
+            print(f"🔁 ({attempt}/{MAX_ATTEMPTS}) Geçmiş bir paylaşıma %{int(sim[0] * 100)} benziyor, yenisi üretiliyor...")
+            continue
+        if FACT_CHECK and cand.get("check_text"):
+            status, issues = fact_check(cand["check_text"])
+            if status == "suspicious":
+                print(f"⚠️ ({attempt}/{MAX_ATTEMPTS}) İddia kontrolü şüpheli buldu: {issues}")
+                flagged.append((cand["text"], issues))
+                continue
+            if status == "unverified":
+                if FACT_CHECK_STRICT:
+                    print(f"⚠️ ({attempt}/{MAX_ATTEMPTS}) Doğrulanamadı, STRICT modda geçilmiyor.")
+                    flagged.append((cand["text"], issues))
+                    continue
+                cand["verify_note"] = "⚠️ İddia kontrolü yapılamadı (doğrulayıcı model yanıt vermedi), elle bakmak isteyebilirsin."
+            else:
+                cand["verify_note"] = "🔍 İddia kontrolü: geçti ✅"
+        content = cand
+        break
     if content is None:
-        print("⏸️ Üç denemede de tekrar eden içerik çıktı, bu tur atlandı.")
-        notify_telegram("⏸️ Tekrar eden içerik tespit edildi, bu tur paylaşım yapılmadı.")
+        if flagged:
+            lines = ["🛑 İddia kontrolü yüzünden bu tur paylaşım yapılmadı."]
+            for t, iss in flagged[-2:]:
+                lines.append(f"\n⚠️ Şüpheli tweet:\n{t}\nSebep: " + "; ".join(iss))
+            notify_telegram("\n".join(lines))
+            print("⏸️ Tüm denemeler şüpheli bulundu, bu tur atlandı.")
+        else:
+            print(f"⏸️ {MAX_ATTEMPTS} denemede de tekrar eden/benzer içerik çıktı, bu tur atlandı.")
+            notify_telegram("⏸️ Tekrar eden veya geçmişe çok benzeyen içerik tespit edildi, bu tur paylaşım yapılmadı.")
         return True
 
     text = content["text"]
@@ -1064,6 +1258,8 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
         record_post(st, text)
 
         msg = f"{title}\n\n{text}"
+        if content.get("verify_note"):
+            msg += f"\n\n{content['verify_note']}"
         if question:
             msg += f"\n\n💬 Yorum: {question}"
             if not replied:
