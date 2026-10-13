@@ -1,3 +1,4 @@
+import csv
 import difflib
 import hashlib
 import json
@@ -7,6 +8,7 @@ import re
 import sys
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -22,6 +24,14 @@ def _env_int(name: str, default: int) -> int:
 
 def _env_flag(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes")
+
+
+def _env_on(name: str, default: bool = True) -> bool:
+    """Varsayılan AÇIK bayrak: sadece 0/false/no yazılırsa kapanır."""
+    val = os.getenv(name)
+    if val is None or not val.strip():
+        return default
+    return val.strip().lower() not in ("0", "false", "no")
 
 
 # --- ENV VARIABLES ---
@@ -59,10 +69,10 @@ ENABLE_TELEGRAM_POLL = _env_flag("ENABLE_TELEGRAM_POLL")
 # Varsayılan KAPALI: hava durumu zaten weather_bot.py / "/hava" komutuyla paylaşılıyor.
 NATURE_MORNING_WEATHER = _env_flag("NATURE_MORNING_WEATHER")
 
-# POST_MODE: auto | series | random | quiz
-#   auto   = 16:00 öncesi günün serisi; 16:00 sonrası Salı/Perşembe/Cumartesi quiz, diğer günler
-#            eski usul rastgele konu
-#   random = eski davranış (rastgele konu, hiçbir şey değişmedi)
+# POST_MODE: auto | series | random | quiz | myth | thread
+#   auto   = 16:00 öncesi günün serisi; 16:00 sonrası Salı/Perşembe/Cumartesi quiz, Çarşamba myth-vs-fact,
+#            Pazar mini thread, Pazartesi/Cuma tek bilgi (random)
+#   random = tek bilgi tweeti (rastgele konu)
 POST_MODE = (os.getenv("POST_MODE") or "auto").strip().lower()
 # Tekrar kontrolü HER ZAMAN açık. Aşağıdaki iki limit varsayılan KAPALI (0), istersen aç.
 DAILY_MAX_POSTS = _env_int("DAILY_MAX_POSTS", 0)  # günlük en fazla paylaşım (0 = sınırsız)
@@ -72,8 +82,8 @@ QUIZ_ANSWER_DELAY_MIN = _env_int("QUIZ_ANSWER_DELAY_MIN", 240)
 # Ücretli X API oto cevap: tek çalışmada en fazla kaç yanıt
 AUTO_REPLY_MAX = _env_int("AUTO_REPLY_MAX", 5)
 FORCE = _env_flag("FORCE")  # FORCE=1 -> limit kontrolünü atla (test)
-# Seri/quiz tweetlerinde en fazla kaç hashtag (eski usul tweetler 5 hashtag'le devam eder)
-MAX_HASHTAGS = _env_int("MAX_HASHTAGS", 3)
+# Tweetlerde en fazla kaç hashtag (X'te 1-2 hashtag en iyi sonucu verir; eski varsayılan 3-5'ti)
+MAX_HASHTAGS = _env_int("MAX_HASHTAGS", 2)
 
 # --- İDDİA KONTROLÜ VE BENZERLİK ---
 # FACT_CHECK=0 -> kapatır. Varsayılan AÇIK: tweet paylaşılmadan önce ikinci bir model sayı/olgu iddialarını denetler.
@@ -86,6 +96,16 @@ SIMILARITY_PCT = _env_int("SIMILARITY_PCT", 60)
 # Şüpheli/tekrar/benzer çıkarsa en fazla kaç kez yeniden üretilsin
 MAX_ATTEMPTS = _env_int("MAX_ATTEMPTS", 4)
 
+# --- v2: KAYNAKLI ÜRETİM, HOOK PUANI, ÇEŞİTLİLİK ---
+# USE_SOURCES=0 -> Wikipedia kaynağı kapatılır, model kendi bilgisiyle yazar (eski davranış)
+USE_SOURCES = _env_on("USE_SOURCES", True)
+# SOURCE_IN_REPLY=0 -> kaynak linki alt yorumda gösterilmez
+SOURCE_IN_REPLY = _env_on("SOURCE_IN_REPLY", True)
+# İkinci model hook'a bu puanın altında not verirse taslak yeniden yazılır (1-10)
+HOOK_MIN = _env_int("HOOK_MIN", 6)
+# Buffer gecikmesine 0..N dakika rastgele eklenir (her tweet tam aynı dakikada çıkmasın)
+POST_JITTER_MAX = _env_int("POST_JITTER_MAX", 5)
+
 TZ = ZoneInfo("Europe/Istanbul")
 X_LIMIT = 280
 STATE_PATH = os.getenv("STATE_PATH") or os.path.join(
@@ -94,7 +114,7 @@ STATE_PATH = os.getenv("STATE_PATH") or os.path.join(
 
 # --- HASHTAG GARANTİSİ VE ETKİLEŞİM HEDEFLERİ ---
 DEFAULT_HASHTAGS = ["#Nature", "#Wildlife", "#Earth", "#NaturePhotography", "#Environment"]
-TARGET_ACCOUNTS = ["NatGeo", "BBCEarth", "EarthPix", "ourplanet", "Discovery"]
+TARGET_ACCOUNTS = [a.strip().lstrip("@") for a in (os.getenv("TARGET_ACCOUNTS") or "NatGeo,BBCEarth,EarthPix,ourplanet,Discovery").split(",") if a.strip()]
 
 # Bio için önerilen satır (X'teki "Otomasyon" etiketi elle açılır)
 BIO_SUGGESTION = "Daily nature facts & quizzes 🌿 | 🤖 Automated account"
@@ -154,6 +174,8 @@ def load_state() -> dict:
     st.setdefault("recent_texts", [])
     st.setdefault("history", [])  # paylaşılan tweetlerin tam metni (benzerlik kontrolü için)
     st.setdefault("since_id", None)
+    st.setdefault("used_sources", [])  # kullanılan Wikipedia makaleleri (tekrar seçilmez)
+    st.setdefault("media_used", [])    # kullanılan Pexels/Unsplash görsel-video id'leri
     return st
 
 
@@ -163,6 +185,8 @@ def save_state(st: dict):
     st["posts"] = st["posts"][-100:]
     st["replied_ids"] = st["replied_ids"][-500:]
     st["recent_texts"] = st["recent_texts"][-10:]
+    st["used_sources"] = st["used_sources"][-400:]
+    st["media_used"] = st["media_used"][-200:]
     try:
         with open(STATE_PATH, "w", encoding="utf-8") as f:
             json.dump(st, f, ensure_ascii=False)
@@ -202,10 +226,14 @@ def posting_allowed(st: dict):
     return True, "OK"
 
 
-def record_post(st: dict, text: str):
+def record_post(st: dict, text: str, meta: dict = None):
+    """meta: cat, mode, hook_style, hook, source gibi alanlar; performans analizi için geçmişle birlikte saklanır."""
     st["hashes"].append(text_hash(text))
-    st["posts"].append(datetime.now(TZ).isoformat())
-    st.setdefault("history", []).append({"text": text, "t": datetime.now(TZ).isoformat()})
+    now = datetime.now(TZ).isoformat()
+    st["posts"].append(now)
+    entry = {"text": text, "t": now}
+    entry.update({k: v for k, v in (meta or {}).items() if v is not None})
+    st.setdefault("history", []).append(entry)
     save_state(st)
 
 
@@ -408,67 +436,133 @@ def get_season_context() -> str:
     return "Autumn (golden leaves, misty mornings)"
 
 
-def call_llms(prompt: str, temperature: float = 0.7):
-    generated = None
+# ============================================================
+#  LLM ROUTER (Shorts botundaki zincirle aynı mantık, 3 farkla)
+#   1) Kota/404 yiyen model KALICI ölmez, süreli soğumaya girer (Render'daki 7/24 süreç için şart).
+#   2) "Hızlı model" ayrımı model adındaki 8b / 20b / mini parçalarına bakar; "gemini" ve "gpt-oss-120b"
+#      yanlışlıkla hızlı sayılmaz.
+#   3) Doğrulayıcı, üreticiyle AYNI sağlayıcı ailesinden çalışmamaya çalışır (kendi uydurmasını onaylamasın).
+# ============================================================
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+GROQ_MODELS = [
+    m.strip()
+    for m in (os.getenv("GROQ_MODELS") or "llama-3.3-70b-versatile,openai/gpt-oss-120b,llama-3.1-8b-instant").split(",")
+    if m.strip()
+]
+_FAST_RE = re.compile(r"(?<![\w.])(?:8|20)b(?!\w)|(?:^|[-/])mini(?:$|[-:])", re.I)
+_cooldown = {}       # model adı -> tekrar denenebileceği zaman (epoch)
+_last_family = None  # son başarılı çağrının sağlayıcı ailesi: gemini | groq | openrouter
+
+
+def _is_fast(name: str) -> bool:
+    return bool(_FAST_RE.search(name.split(":", 1)[-1]))
+
+
+def _gemini_call(prompt: str, temperature: float, as_json: bool) -> str:
+    cfg = {"temperature": temperature}
+    if as_json:
+        cfg["responseMimeType"] = "application/json"
+    res = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+        headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+        json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg},
+        timeout=30,
+    )
+    if res.status_code != 200:
+        raise RuntimeError(f"{res.status_code} {res.text[:150]}")
+    parts = res.json()["candidates"][0]["content"]["parts"]
+    return "".join(p.get("text", "") for p in parts if not p.get("thought"))
+
+
+def _chat_call(url: str, key: str, model: str, prompt: str, temperature: float, timeout: int = 30) -> str:
+    res = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": temperature},
+        timeout=timeout,
+    )
+    if res.status_code != 200:
+        raise RuntimeError(f"{res.status_code} {res.text[:150]}")
+    return res.json()["choices"][0]["message"]["content"]
+
+
+def _chain(as_json: bool, tier: str = "strong", avoid_family=None):
+    chain = []
     if GEMINI_API_KEY:
-        for attempt in range(1, 4):
+        chain.append((f"gemini:{GEMINI_MODEL}", lambda p, t: _gemini_call(p, t, as_json)))
+    if GROQ_API_KEY:
+        for m in GROQ_MODELS:
+            chain.append((f"groq:{m}", lambda p, t, m=m: _chat_call(GROQ_URL, GROQ_API_KEY, m, p, t)))
+    if OPENROUTER_API_KEY:
+        chain.append((
+            f"openrouter:{OPENROUTER_MODEL}",
+            lambda p, t: _chat_call(OPENROUTER_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL, p, t, 40),
+        ))
+    now = time.time()
+    chain = [c for c in chain if _cooldown.get(c[0], 0) <= now]
+    # sort kararlıdır: aynı gruptakiler kendi sırasını korur
+    if tier == "fast":
+        chain.sort(key=lambda c: 0 if _is_fast(c[0]) else 1)
+    else:
+        chain.sort(key=lambda c: 1 if _is_fast(c[0]) else 0)
+    if avoid_family:
+        chain.sort(key=lambda c: c[0].split(":", 1)[0] == avoid_family)
+    return chain
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+
+
+def _extract_json(text: str):
+    return json.loads(text[text.index("{"): text.rindex("}") + 1])
+
+
+def _ask(prompt: str, as_json: bool = True, tier: str = "strong", temperature: float = 0.7, avoid_family=None):
+    """Zincirdeki modelleri sırayla dener. Başarılıysa metin, hepsi başarısızsa None döner."""
+    global _last_family
+    chain = _chain(as_json, tier, avoid_family)
+    if not chain:
+        print("LLM: kullanılabilir model yok (anahtar eksik ya da hepsi soğumada).")
+        return None
+    for rnd in range(2):
+        for name, fn in list(chain):
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-                res = requests.post(
-                    url,
-                    json={
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": temperature},
-                    },
-                    timeout=20,
-                )
-                if res.status_code == 200:
-                    generated = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    break
-                print(f"Gemini deneme {attempt}/3 HTTP {res.status_code}: {res.text[:150]}")
-                if res.status_code not in (429, 500, 502, 503, 504):
-                    break
+                text = _clean(fn(prompt, temperature) or "")
+                if as_json:
+                    text = json.dumps(_extract_json(text), ensure_ascii=False)
+                if text:
+                    _last_family = name.split(":", 1)[0]
+                    return text
             except Exception as e:
-                print(f"Gemini Hatası (deneme {attempt}/3): {e}")
-            time.sleep(3 * attempt)
+                msg = str(e)
+                print(f"LLM hata {name}: {msg[:120]}")
+                code = msg[:3] if msg[:3].isdigit() else ""
+                if code == "429":
+                    _cooldown[name] = time.time() + 1800    # kota: yarım saat dinlendir
+                elif code in ("401", "403", "404"):
+                    _cooldown[name] = time.time() + 86400   # yanlış model adı / anahtar: bir gün
+                if _cooldown.get(name, 0) > time.time():
+                    chain = [c for c in chain if c[0] != name]
+        if not chain:
+            break
+        time.sleep(3 * (rnd + 1))
+    return None
 
-    if not generated and GROQ_API_KEY:
-        try:
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": temperature,
-            }
-            res = requests.post(url, headers=headers, json=payload, timeout=20)
-            if res.status_code == 200:
-                generated = res.json()["choices"][0]["message"]["content"].strip()
-            else:
-                print(f"Groq HTTP {res.status_code}: {res.text[:150]}")
-        except Exception as e:
-            print(f"Groq Hatası: {e}")
 
-    if not generated and OPENROUTER_API_KEY:
-        try:
-            res = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": OPENROUTER_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": temperature,
-                },
-                timeout=30,
-            )
-            if res.status_code == 200:
-                generated = res.json()["choices"][0]["message"]["content"].strip()
-            else:
-                print(f"OpenRouter HTTP {res.status_code}: {res.text[:150]}")
-        except Exception as e:
-            print(f"OpenRouter Hatası: {e}")
+def call_llms(prompt: str, temperature: float = 0.7):
+    """Eski imza korunur: metin döner, hepsi başarısız olursa None."""
+    return _ask(prompt, as_json=False, tier="strong", temperature=temperature)
 
-    return generated
+
+def call_llms_json(prompt: str, temperature: float = 0.7, tier: str = "strong", avoid_family=None):
+    """JSON üretir; dict döner, olmazsa None."""
+    raw = _ask(prompt, as_json=True, tier=tier, temperature=temperature, avoid_family=avoid_family)
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
 
 
 def generate_ai_text(prompt: str) -> str:
@@ -484,139 +578,408 @@ def clean_llm_text(s: str) -> str:
 
 
 # ============================================================
-#  İDDİA KONTROLÜ (ikinci model, düşük sıcaklık)
-#  Üretici Gemini ise doğrulayıcı önce Groq'a gider; böylece model kendi uydurmasını onaylamaz.
+#  İDDİA KONTROLÜ + HOOK PUANI (tek çağrı, ikinci model, sıcaklık 0)
+#  Kaynak (Wikipedia özeti) varsa soru "kaynakta yazıyor mu?" olur; modelin kendi hafızasına güvenilmez.
+#  Doğrulayıcı mümkünse üreticiden FARKLI sağlayıcı ailesinden seçilir.
 # ============================================================
-def _openai_style_chat(url: str, key: str, model: str, prompt: str, temperature: float, timeout: int):
-    try:
-        res = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": temperature},
-            timeout=timeout,
+def call_verifier(prompt: str):
+    return _ask(prompt, as_json=False, tier="strong", temperature=0.0, avoid_family=_last_family)
+
+
+def review_draft(check_text: str, src=None, avoid_family=None):
+    """(verdict, hook, issues). verdict: 'ok' | 'suspicious' | 'unverified'. hook: 1-10 ya da None."""
+    if src:
+        basis = (
+            "The ONLY fact base is the SOURCE below (Wikipedia). Answer 'suspicious' if the text contains ANY number, "
+            "name, date or claim that is not stated in SOURCE or that distorts it. Only truly universal common "
+            "knowledge may go beyond SOURCE.\n"
+            f"SOURCE ({src['title']}): {src['extract']}\n\n"
         )
-        if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"].strip()
-        print(f"Doğrulayıcı HTTP {res.status_code} ({model}): {res.text[:120]}")
+    else:
+        basis = (
+            "No source is given. Answer 'suspicious' if ANY claim is wrong, exaggerated, outdated, disputed, or if a "
+            "number cannot be confirmed from well-established knowledge.\n\n"
+        )
+    prompt = (
+        "You are a strict fact-checker and social media editor for a nature-facts account on X. "
+        + basis
+        + "Answer 'ok' only if every claim is correct. "
+        "If the text is a quiz, also verify that the marked answer is the single correct option. "
+        "Also rate the HOOK (the first line) from 1 to 10: 10 = specific, surprising, scroll-stopping; "
+        "5 = generic ('Did you know...'); 1 = boring. Do not judge anything else about style.\n\n"
+        f"TEXT:\n{check_text}\n\n"
+        'Return ONLY valid JSON, no markdown: {"verdict": "ok" or "suspicious", "hook": 1-10, "issues": ["short concrete fix"]}.'
+    )
+    raw = _ask(prompt, as_json=True, tier="strong", temperature=0.0, avoid_family=avoid_family)
+    if not raw:
+        return "unverified", None, ["Doğrulayıcı model cevap vermedi."]
+    try:
+        data = json.loads(raw)
+        verdict = str(data.get("verdict", "")).strip().lower()
+        issues = [str(i)[:160] for i in (data.get("issues") or [])][:4]
+        try:
+            hook = max(1, min(10, int(float(data.get("hook")))))
+        except (TypeError, ValueError):
+            hook = None
+        if verdict == "ok":
+            return "ok", hook, issues
+        if verdict == "suspicious":
+            return "suspicious", hook, issues or ["Şüpheli iddia (ayrıntı verilmedi)."]
     except Exception as e:
-        print(f"Doğrulayıcı hatası ({model}): {e}")
+        print(f"Doğrulama cevabı ayrıştırılamadı: {e}")
+    return "unverified", None, ["Doğrulama cevabı okunamadı."]
+
+
+def fact_check(text: str, source=None):
+    """Eski imza: (durum, notlar). durum: 'ok' | 'suspicious' | 'unverified'."""
+    verdict, _hook, issues = review_draft(text, source)
+    return verdict, issues
+
+
+# ============================================================
+#  KAYNAKLI ÜRETİM (v2)
+#  Shorts botundaki "grounding" mantığının doğa karşılığı: konu için Wikipedia'dan gerçek bir özet çekilir,
+#  model SADECE o metindeki bilgiyle yazar, doğrulayıcı da aynı metne karşı kontrol eder.
+#  Kaynak bulunamazsa eski davranışa düşer (modelin kendi bilgisi + doğrulayıcı).
+# ============================================================
+WIKI_API = "https://en.wikipedia.org/w/api.php"
+HTTP_HEADERS = {"User-Agent": "NatureFactsBot/2.0 (automated nature facts account; GitHub Actions)"}
+
+# Kategori başına Wikipedia arama tohumları. Her seferinde biri seçilir, sonuçlardan kullanılmamış bir makale alınır.
+SOURCE_SEEDS = {
+    "animals": ["apex predator", "primate behaviour", "big cat", "elephant", "marsupial", "nocturnal mammal",
+                "animal migration", "endangered species"],
+    "birds": ["migratory bird", "bird of prey", "songbird", "flightless bird", "seabird", "owl", "hummingbird",
+              "corvid intelligence"],
+    "trees": ["old-growth forest", "tree species", "rainforest canopy", "bristlecone pine", "mangrove", "redwood",
+              "forest ecology", "tree rings"],
+    "ocean": ["deep sea creature", "coral reef", "whale", "shark", "octopus", "jellyfish", "kelp forest",
+              "bioluminescence"],
+    "water": ["waterfall", "river delta", "freshwater lake", "glacial lake", "wetland", "hot spring", "estuary",
+              "aquifer"],
+    "plants": ["carnivorous plant", "wildflower", "orchid", "desert plant", "pollination", "seed dispersal", "moss",
+               "alpine plant"],
+    "insects": ["pollinator bee", "butterfly migration", "ant colony", "dragonfly", "beetle", "social insect",
+                "firefly", "cicada"],
+    "earth": ["volcano", "canyon", "mountain range", "cave system", "desert landscape", "geyser", "island formation",
+              "rock formation"],
+    "weather": ["cloud type", "thunderstorm", "aurora", "rainbow", "fog", "monsoon", "lightning", "snow crystal"],
+    "fungi": ["mushroom species", "mycorrhiza", "bioluminescent fungus", "lichen", "mold ecology", "puffball",
+              "truffle", "slime mold"],
+}
+
+# Hook (ilk satır) kalıpları. Metrik verisi varsa en iyi giden kalıp daha sık seçilir (epsilon-greedy), yoksa dönüşümlü.
+HOOK_STYLES = {
+    "number": "open with a specific, surprising number or measurement",
+    "question": "open with a short curiosity question that the rest of the tweet answers",
+    "contrast": "open with a reversal: it looks like X, but actually Y",
+    "scene": "open with a vivid one-line scene that puts the reader in the moment",
+    "superlative": "open with a superlative (the only, the largest, the oldest, the fastest) that is actually true",
+}
+
+
+# ---------- performans geri beslemesi (Shorts'taki winners() karşılığı) ----------
+def _scored(st: dict):
+    return [h for h in st.get("history", [])
+            if isinstance(h, dict) and isinstance(h.get("score"), (int, float))]
+
+
+def winners(st: dict, n: int = 4):
+    """Skoru en yüksek n paylaşımın temiz metni (prompt'a stil örneği olarak girer). Skor yoksa boş liste."""
+    rows = sorted((h for h in _scored(st) if h.get("text") and h["score"] > 0), key=lambda h: h["score"], reverse=True)
+    return [re.sub(r"\s*#\w+", "", h["text"]).strip() for h in rows[:n]]
+
+
+def choose_hook_style(st: dict) -> str:
+    """Yeterli skor varsa %70 en iyi ortalamalı kalıp, aksi halde son 3'te kullanılmayanlardan rastgele."""
+    scored = [h for h in _scored(st) if h.get("hook_style") in HOOK_STYLES]
+    if len(scored) >= 12 and random.random() > 0.3:
+        avg = {}
+        for s in HOOK_STYLES:
+            vals = [h["score"] for h in scored if h["hook_style"] == s]
+            if len(vals) >= 2:
+                avg[s] = sum(vals) / len(vals)
+        if avg:
+            return max(avg, key=avg.get)
+    recent = [h.get("hook_style") for h in st.get("history", [])[-3:] if isinstance(h, dict)]
+    pool = [s for s in HOOK_STYLES if s not in recent] or list(HOOK_STYLES)
+    return random.choice(pool)
+
+
+def pick_category(st: dict) -> str:
+    """Son 2 paylaşımın kategorisini tekrarlamaz; yeterli skor varsa %70 en iyi ortalamalı kategoriyi seçer."""
+    recent = [h.get("cat") for h in st.get("history", [])[-2:] if isinstance(h, dict)]
+    pool = [c for c in TOPIC_POOL if c not in recent] or list(TOPIC_POOL)
+    scored = [h for h in _scored(st) if h.get("cat") in TOPICS]
+    if len(scored) >= 12 and random.random() > 0.3:
+        avg = {}
+        for c in set(pool):
+            vals = [h["score"] for h in scored if h["cat"] == c]
+            if len(vals) >= 2:
+                avg[c] = sum(vals) / len(vals)
+        if avg:
+            return max(avg, key=avg.get)
+    return random.choice(pool)
+
+
+def plan_category(mode: str, st: dict, now: datetime):
+    if mode == "weather":
+        return None
+    if mode == "series":
+        return SERIES[now.weekday()]["cat"]
+    return pick_category(st)
+
+
+_URL_RE = re.compile(r"(?:https?://|pic\.(?:twitter|x)\.com/)\S+", re.I)
+
+
+def _core_key(text: str) -> str:
+    return _core_text(_URL_RE.sub(" ", text or ""))[:40]
+
+
+def _num(row: dict, *names):
+    for n in names:
+        v = row.get(n)
+        if v not in (None, ""):
+            try:
+                return float(str(v).replace(",", "").replace(" ", ""))
+            except ValueError:
+                pass
+    return 0.0
+
+
+def import_metrics(path: str) -> int:
+    """X Analytics'ten (ya da elle hazırlanmış) CSV'deki beğeni/yanıt/repost sayılarını geçmişle eşleştirip skor yazar.
+    Kullanım: python nature_bot.py --import-metrics export.csv  (sonra bot_state.json'u repoya commit et)."""
+    st = load_state()
+    index = {_core_key(h["text"]): h for h in st["history"] if isinstance(h, dict) and h.get("text")}
+    matched = 0
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            text = low.get("post text") or low.get("tweet text") or low.get("text") or ""
+            h = index.get(_core_key(text))
+            if h is None:
+                continue
+            likes = _num(low, "likes", "like count")
+            replies = _num(low, "replies", "reply count")
+            reposts = _num(low, "reposts", "retweets", "retweet count")
+            bookmarks = _num(low, "bookmarks", "bookmark count")
+            imps = _num(low, "impressions", "views")
+            score = likes + 3 * replies + 2 * reposts + 2 * bookmarks
+            if not score and imps:
+                score = imps / 50
+            h["score"] = round(score, 1)
+            if imps:
+                h["impressions"] = int(imps)
+            matched += 1
+    save_state(st)
+    return matched
+
+
+# ---------- kaynak seçimi ----------
+def _wiki_extract(title: str):
+    try:
+        res = requests.get(
+            WIKI_API,
+            params={"action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1, "redirects": 1,
+                    "titles": title, "format": "json"},
+            headers=HTTP_HEADERS, timeout=10,
+        )
+        res.raise_for_status()
+        page = next(iter(res.json()["query"]["pages"].values()))
+        text = re.sub(r"\s+", " ", page.get("extract") or "").strip()
+        if len(text) < 300 or "may refer to" in text[:250]:
+            return None
+        real = page.get("title", title)
+        return {
+            "title": real,
+            "extract": text[:1800],
+            "url": "https://en.wikipedia.org/wiki/" + urllib.parse.quote(real.replace(" ", "_")),
+        }
+    except Exception as e:
+        print(f"Wikipedia özet hatası ({title}): {e}")
+        return None
+
+
+def pick_source(cat: str, st: dict):
+    """Kategoriye uygun, daha önce kullanılmamış bir Wikipedia özeti. Bulunamazsa None (akış eski moda düşer)."""
+    if not USE_SOURCES:
+        return None
+    seeds = SOURCE_SEEDS.get(cat) or SOURCE_SEEDS["animals"]
+    used = set(st.get("used_sources", []))
+    for _ in range(3):
+        term = random.choice(seeds)
+        try:
+            res = requests.get(
+                WIKI_API,
+                params={"action": "query", "list": "search", "srsearch": term, "srnamespace": 0,
+                        "srlimit": 20, "format": "json"},
+                headers=HTTP_HEADERS, timeout=10,
+            )
+            res.raise_for_status()
+            titles = [h["title"] for h in res.json()["query"]["search"]]
+        except Exception as e:
+            print(f"Wikipedia arama hatası: {e}")
+            continue
+        random.shuffle(titles)
+        for title in titles[:8]:
+            low = title.lower()
+            if title in used or low.startswith(("list of", "outline of", "index of")) or "disambiguation" in low:
+                continue
+            src = _wiki_extract(title)
+            if src:
+                return src
     return None
 
 
-def call_verifier(prompt: str):
-    out = None
-    if GROQ_API_KEY:
-        out = _openai_style_chat(
-            "https://api.groq.com/openai/v1/chat/completions", GROQ_API_KEY,
-            "llama-3.3-70b-versatile", prompt, 0.0, 20,
-        )
-    if not out and OPENROUTER_API_KEY:
-        out = _openai_style_chat(
-            "https://openrouter.ai/api/v1/chat/completions", OPENROUTER_API_KEY,
-            OPENROUTER_MODEL, prompt, 0.0, 30,
-        )
-    if not out and GEMINI_API_KEY:
+# ---------- yazar ----------
+def _source_block(src) -> str:
+    if not src:
+        return "No source is provided: only state facts you are 100% sure about and never invent numbers, names or dates. "
+    return (
+        "SOURCE (Wikipedia) is the ONLY allowed fact base. Every number, name, date and claim you write MUST be stated "
+        "in it; paraphrase in your own words, never copy sentences, add nothing from memory:\n"
+        f'"""{src["title"]}: {src["extract"]}"""\n'
+    )
+
+
+def _writer_prompt(kind, cat, st, src, series, hook_style, feedback) -> str:
+    topic = TOPICS[cat][0]
+    if kind == "series":
+        task = (f"Write ONE tweet for the weekly series '{series['name']}' containing ONE surprising, true fact about "
+                f"{topic}. Start the body with the emoji {series['emoji']}. Body max 190 characters. ")
+    elif kind == "myth":
+        task = (f"Write ONE 'myth vs fact' tweet about {topic}: first line a genuinely common misconception "
+                "('Myth: ...'), then the truth ('Fact: ...'). Body max 230 characters. ")
+    elif kind == "thread":
+        task = (f"Write a 3-tweet mini thread about {topic}. tweets[0]: a scroll-stopping hook that promises a payoff, "
+                "max 200 characters. tweets[1] and tweets[2]: one concrete fact each, max 240 characters each. "
+                "No numbering like 1/3 and no hashtags inside the tweets. ")
+    else:
+        task = (f"Write ONE tweet containing ONE surprising, true fact about {topic}. Body max 200 characters. "
+                f"Seasonal context (use only if it fits naturally): {get_season_context()}. ")
+    hook = "" if kind == "myth" else f"Hook style for the first line: {HOOK_STYLES[hook_style]}. "
+    win = winners(st)
+    win_block = (
+        "Our best-performing posts so far (learn the style and curiosity pattern, do NOT copy): "
+        + " | ".join(win) + ". "
+    ) if win else ""
+    if kind == "thread":
+        schema = '{"tweets": ["hook tweet", "fact tweet", "fact tweet"], '
+    else:
+        schema = '{"text": "tweet body WITHOUT hashtags", '
+    schema += ('"hashtags": ["#SpecificTag", "#BroadTag"], '
+               '"keyword": "2-3 English words for a stock photo or video of the subject, e.g. humpback whale", '
+               '"question": "one short follow-up question that invites replies, max 120 characters"}')
+    return (
+        "You run a popular, trustworthy nature-facts account on X (Twitter). "
+        + task + _source_block(src) + hook
+        + "Write like a curious human: concrete, vivid, no filler. Never open with 'Did you know'. Use at most one emoji. "
+        + win_block + avoid_clause(st) + (feedback + " " if feedback else "")
+        + "\nReturn ONLY valid JSON, no markdown, with this shape: " + schema
+    )
+
+
+def _clean_body(s) -> str:
+    s = clean_llm_text(str(s or ""))
+    s = re.sub(r"\s*#\w+", "", s)
+    return re.sub(r"[ \t]+\n", "\n", s).strip()
+
+
+def _clean_question(q):
+    if not q:
+        return None
+    lines = str(q).strip().strip('"').strip().splitlines()
+    if not lines:
+        return None
+    q = re.sub(r"#\w+", "", lines[0]).strip().strip('"').strip()
+    return q if "?" in q and 10 <= len(q) <= 200 else None
+
+
+def _closing_reply(q: str, src) -> str:
+    """Alt yorum: soru + (varsa) kaynak linki. Link ana tweette değil, yorumda durur (erişimi düşürmez)."""
+    q = fit_for_x(q)
+    if src and SOURCE_IN_REPLY:
+        link = f"\n\n📚 Source: {src['url']}"
+        if x_length(q) + len(link) <= 275:
+            return q + link
+    return q
+
+
+def generate_post(kind, cat, st, src=None, series=None, hook_style=None, feedback=""):
+    """kind: fact | series | myth | thread.
+    Döner: text, followups, keyword, cat, hook_style, src, family, check_text, kind."""
+    hook_style = hook_style or choose_hook_style(st)
+    defaults = CATEGORY_TAGS.get(cat, ["#Nature"])
+    data, family = None, None
+    raw = _ask(_writer_prompt(kind, cat, st, src, series, hook_style, feedback),
+               as_json=True, tier="strong", temperature=0.8)
+    if raw:
+        family = _last_family
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-            res = requests.post(
-                url,
-                json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.0}},
-                timeout=20,
-            )
-            if res.status_code == 200:
-                out = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            else:
-                print(f"Doğrulayıcı Gemini HTTP {res.status_code}: {res.text[:120]}")
-        except Exception as e:
-            print(f"Doğrulayıcı Gemini hatası: {e}")
-    return out
+            data = json.loads(raw)
+        except ValueError:
+            data = None
 
-
-def fact_check(text: str):
-    """(durum, notlar). durum: 'ok' | 'suspicious' | 'unverified'."""
-    prompt = (
-        "You are a strict fact-checker for a nature-facts social media account. "
-        "Check every factual claim and every number or unit in the text below. "
-        "Answer 'suspicious' if ANY claim is wrong, exaggerated, outdated, disputed, or if a number "
-        "cannot be confirmed from well-established knowledge. "
-        "Answer 'ok' only if every claim is correct. "
-        "If the text is a quiz, also verify that the marked answer is the single correct option. "
-        "Do not judge style.\n\n"
-        f"TEXT:\n{text}\n\n"
-        'Return ONLY valid JSON, no markdown: {"verdict": "ok" or "suspicious", "issues": ["short issue"]}.'
-    )
-    raw = call_verifier(prompt)
-    if not raw:
-        return "unverified", ["Doğrulayıcı model cevap vermedi."]
+    follow, keyword, question, llm_tags = [], None, None, []
     try:
-        m = re.search(r"\{.*\}", clean_llm_text(raw), flags=re.S)
-        data = json.loads(m.group(0))
-        verdict = str(data.get("verdict", "")).strip().lower()
-        issues = [str(i)[:160] for i in (data.get("issues") or [])][:4]
-        if verdict == "ok":
-            return "ok", []
-        if verdict == "suspicious":
-            return "suspicious", issues or ["Şüpheli iddia (ayrıntı verilmedi)."]
+        if not isinstance(data, dict):
+            raise ValueError("model cevap vermedi")
+        if kind == "thread":
+            tweets = [_clean_body(t) for t in (data.get("tweets") or [])][:3]
+            if len(tweets) < 3 or any(len(t) < 25 for t in tweets):
+                raise ValueError("thread eksik")
+            body, follow = tweets[0], tweets[1:]
+        else:
+            body = _clean_body(data.get("text"))
+            if len(body) < 30:
+                raise ValueError("metin çok kısa")
+        keyword = re.sub(r"\s+", " ", re.sub(r"[^A-Za-z ]", " ", str(data.get("keyword") or ""))).strip()[:40] or None
+        question = _clean_question(data.get("question"))
+        for t in data.get("hashtags") or []:
+            t = str(t).strip()
+            t = t if t.startswith("#") else "#" + t
+            if re.fullmatch(r"#\w{2,30}", t):
+                llm_tags.append(t)
     except Exception as e:
-        print(f"Doğrulama cevabı ayrıştırılamadı: {e}")
-    return "unverified", ["Doğrulama cevabı okunamadı."]
+        # Model çöktü/saçmaladı: havuzdan düz bilgi. Kaynağa dayanmadığı için src düşer.
+        print(f"Yazar çıktısı kullanılamadı ({e}); havuz bilgisine düşülüyor.")
+        cat2, fact = pick_pool_note_cat(cat, st)
+        cat = cat2 if cat2 in TOPICS else cat
+        defaults = CATEGORY_TAGS.get(cat, ["#Nature"])
+        body = f"{series['emoji']} {fact}" if series else fact
+        follow, keyword, question, llm_tags = [], None, None, []
+        kind = "series" if series else "fact"
+        src, family = None, None
+
+    if series and not body.startswith(series["emoji"]):
+        # model başka bir emoji/işaretle başladıysa onu at, seri emojisini başa koy (çift emoji olmasın)
+        body = f"{series['emoji']} " + re.sub(r"^[^\w#@]+", "", body)
+    extra = [series["tag"], defaults[0]] if series else llm_tags + defaults
+    text = fit_for_x(limit_hashtags(body, extra=extra))
+
+    followups = [fit_for_x(t) for t in follow]
+    q = question or random.choice(QUESTION_BANK.get(cat) or QUESTION_BANK["generic"])
+    followups.append(_closing_reply(q, src))
+
+    check_text = text if not follow else text + "\n---\n" + "\n".join(follow)
+    return {
+        "text": text, "followups": followups, "keyword": keyword, "cat": cat, "hook_style": hook_style,
+        "src": src, "family": family, "check_text": check_text, "kind": kind,
+    }
 
 
-# ============================================================
-#  ESKİ USUL: RASTGELE KONU (davranış aynı; sadece LLM çökünce konu-görsel uyumu düzeltildi)
-# ============================================================
 def generate_random_tweet(cat: str, st: dict):
-    """(metin, kategori) döner."""
-    ctx = get_season_context()
-    topic, _ = TOPICS[cat]
-    tags = " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
-    prompt = (
-        f"Write an engaging English tweet containing ONE surprising, true and well-established fact about {topic}. "
-        "Only state facts you are sure about and do not invent numbers. "
-        f"Seasonal context (use only if it fits naturally): {ctx}. "
-        "Max 230 characters in total including hashtags. "
-        f"End with these hashtags plus 1-2 more relevant ones: {tags}. "
-        + avoid_clause(st)
-        + "Output only the tweet text, no quotes, no preamble."
-    )
-    raw = call_llms(prompt)
-    if raw:
-        text = raw.strip().strip('"').strip()
-    else:
-        cat2, fact = pick_pool_note_cat(cat, st)
-        cat = cat2 if cat2 in TOPICS else cat
-        text = f"{fact} " + " ".join(CATEGORY_TAGS.get(cat, ["#Nature"]))
-    return fit_for_x(ensure_hashtags(text)), cat
+    """Eski imza: (metin, kategori)."""
+    post = generate_post("fact", cat, st, src=pick_source(cat, st))
+    return post["text"], post["cat"]
 
 
-# ============================================================
-#  1) KONU SERİSİ
-# ============================================================
 def generate_series_tweet(cat: str, series: dict, st: dict):
-    """(metin, kategori) döner."""
-    topic, _ = TOPICS[cat]
-    tags = CATEGORY_TAGS.get(cat, ["#Nature"])
-    recent = " | ".join(st.get("recent_texts", [])[-5:])
-    prompt = (
-        f"Write an engaging English tweet for the weekly series '{series['name']}'. "
-        f"It must contain ONE surprising, true and well-established fact about {topic}. "
-        "Only state facts you are sure about and do not invent numbers. "
-        f"Start the tweet with the emoji {series['emoji']}. "
-        "Max 220 characters including hashtags. "
-        f"End with exactly these hashtags: {series['tag']} {tags[0]}. "
-        + (f"Do NOT repeat any of these earlier topics: {recent}. " if recent else "")
-        + avoid_clause(st)
-        + "Output only the tweet text, no quotes, no preamble."
-    )
-    raw = call_llms(prompt)
-    if raw:
-        text = clean_llm_text(raw)
-    else:
-        cat2, fact = pick_pool_note_cat(cat, st)
-        cat = cat2 if cat2 in TOPICS else cat
-        text = f"{series['emoji']} {fact}"
-    text = limit_hashtags(text, extra=[series["tag"], tags[0]])
-    return fit_for_x(text), cat
+    """Eski imza: (metin, kategori)."""
+    post = generate_post("series", cat, st, src=pick_source(cat, st), series=series)
+    return post["text"], post["cat"]
 
 
 # ============================================================
@@ -640,33 +1003,38 @@ QUIZ_FALLBACK = [
 LETTERS = ["A", "B", "C"]
 
 
-def generate_quiz(st: dict):
-    cat = random.choice(list(TOPICS.keys()))
+def generate_quiz(st: dict, src=None, cat=None):
+    cat = cat if cat in TOPICS else pick_category(st)
     topic, _ = TOPICS[cat]
     prompt = (
         f"Create ONE multiple-choice quiz question about {topic}. "
-        "Only use facts you are 100% sure about. Exactly 3 short options, exactly one correct. "
-        "Return ONLY valid JSON, no markdown, with this shape: "
+        + _source_block(src)
+        + "Exactly 3 short options, exactly one correct; the correct answer must be a fact you are 100% sure about"
+        + (" and it must be stated in the SOURCE. " if src else ". ")
+        + "Return ONLY valid JSON, no markdown, with this shape: "
         '{"q": "question under 90 characters", "options": ["a", "b", "c"], '
-        '"answer": 0, "explain": "one short sentence under 110 characters"}. '
+        '"answer": 0, "explain": "one short sentence under 110 characters", '
+        '"keyword": "2-3 English words for a stock photo of the subject"}. '
         "answer is the 0-based index of the correct option. Randomize the position of the correct option. "
         + avoid_clause(st)
     )
-    raw = call_llms(prompt, temperature=0.9)
-    if raw:
+    data = call_llms_json(prompt, temperature=0.9)
+    if data:
         try:
-            m = re.search(r"\{.*\}", clean_llm_text(raw), flags=re.S)
-            data = json.loads(m.group(0))
             opts = [str(o).strip() for o in data["options"]][:3]
             ans = int(data["answer"])
             q = str(data["q"]).strip()
             explain = str(data["explain"]).strip()
             if len(opts) == 3 and 0 <= ans < 3 and q.endswith("?") and explain:
-                return {"cat": cat, "q": q, "options": opts, "answer": ans, "explain": explain}
+                kw = re.sub(r"\s+", " ", re.sub(r"[^A-Za-z ]", " ", str(data.get("keyword") or ""))).strip()[:40] or None
+                return {"cat": cat, "q": q, "options": opts, "answer": ans, "explain": explain,
+                        "keyword": kw, "used_src": bool(src)}
         except Exception as e:
             print(f"Quiz JSON ayrıştırılamadı: {e}")
     pool = [x for x in QUIZ_FALLBACK if text_hash(x["q"]) not in st["hashes"]] or QUIZ_FALLBACK
-    return dict(random.choice(pool))
+    quiz = dict(random.choice(pool))
+    quiz["used_src"] = False
+    return quiz
 
 
 def format_quiz_tweet(quiz: dict) -> str:
@@ -679,13 +1047,15 @@ def format_quiz_tweet(quiz: dict) -> str:
     return fit_for_x(limit_hashtags(text))
 
 
-def format_quiz_answer(quiz: dict) -> str:
+def format_quiz_answer(quiz: dict, src_url: str = None) -> str:
     letter = LETTERS[quiz["answer"]]
     text = (
         f"✅ Quiz answer: {letter}) {quiz['options'][quiz['answer']]}\n\n"
         f"{quiz['explain']}\n\n"
         f"(Q: {quiz['q']})"
     )
+    if src_url and SOURCE_IN_REPLY and len(text) + len(src_url) + 12 <= 265:
+        text += f"\n\n📚 {src_url}"
     tags = CATEGORY_TAGS.get(quiz["cat"], ["#Nature"])
     return fit_for_x(limit_hashtags(text + " #NatureQuiz", extra=[tags[0]]))
 
@@ -739,74 +1109,106 @@ def generate_question(tweet_text: str) -> str:
 
 # --- MEDYA ÇEKME İŞLEMLERİ (VİDEO VE RESİM) ---
 
-def fetch_hd_video_url(query: str = "nature landscape") -> str:
-    """Pexels API üzerinden HD MP4 Video arar."""
-    if PEXELS_API_KEY:
-        try:
-            res = requests.get(
-                "https://api.pexels.com/videos/search",
-                headers={"Authorization": PEXELS_API_KEY},
-                params={"query": query, "per_page": 10, "orientation": "landscape"},
-                timeout=10,
-            )
-            if res.status_code == 200:
-                videos = res.json().get("videos", [])
-                if videos:
-                    chosen = random.choice(videos)
-                    for vf in chosen.get("video_files", []):
-                        if vf.get("file_type") == "video/mp4" and vf.get("quality") == "hd":
-                            return vf.get("link")
-                    if chosen.get("video_files"):
-                        return chosen["video_files"][0].get("link")
-        except Exception as e:
-            print(f"Pexels Video hatası: {e}")
-    return None
+def _pexels_video(query: str, used: set):
+    """(id, url). 45 sn'den uzun klipleri ve daha önce kullanılanları eler."""
+    if not PEXELS_API_KEY:
+        return None, None
+    try:
+        res = requests.get(
+            "https://api.pexels.com/videos/search",
+            headers={"Authorization": PEXELS_API_KEY},
+            params={"query": query, "per_page": 15, "orientation": "landscape"},
+            timeout=10,
+        )
+        if res.status_code == 200:
+            videos = [v for v in res.json().get("videos", []) if (v.get("duration") or 0) <= 45]
+            fresh = [v for v in videos if f"pv{v.get('id')}" not in used] or videos
+            if fresh:
+                chosen = random.choice(fresh)
+                vid = f"pv{chosen.get('id')}"
+                files = chosen.get("video_files", [])
+                for vf in files:
+                    if (vf.get("file_type") == "video/mp4" and vf.get("quality") == "hd"
+                            and (vf.get("width") or 0) <= 1920):
+                        return vid, vf.get("link")
+                if files:
+                    return vid, files[0].get("link")
+    except Exception as e:
+        print(f"Pexels Video hatası: {e}")
+    return None, None
 
 
-def fetch_hd_image_url(query: str = "nature landscape"):
+def _fetch_image(query: str, used: set):
+    """(id, url). Önce Unsplash (aynı görsel gelirse 3 kez dener), sonra Pexels."""
     if UNSPLASH_ACCESS_KEY:
-        try:
-            res = requests.get(
-                "https://api.unsplash.com/photos/random",
-                params={"query": query, "orientation": "landscape", "client_id": UNSPLASH_ACCESS_KEY},
-                timeout=10,
-            )
-            if res.status_code == 200:
+        for _ in range(3):
+            try:
+                res = requests.get(
+                    "https://api.unsplash.com/photos/random",
+                    params={"query": query, "orientation": "landscape", "client_id": UNSPLASH_ACCESS_KEY},
+                    timeout=10,
+                )
+                if res.status_code != 200:
+                    break
                 data = res.json()
+                pid = f"u{data.get('id')}"
+                if pid in used:
+                    continue
                 try:
                     dl = data.get("links", {}).get("download_location")
                     if dl:
                         requests.get(dl, params={"client_id": UNSPLASH_ACCESS_KEY}, timeout=5)
                 except Exception:
                     pass
-                return data["urls"]["regular"]
-        except Exception as e:
-            print(f"Unsplash hatası: {e}")
+                return pid, data["urls"]["regular"]
+            except Exception as e:
+                print(f"Unsplash hatası: {e}")
+                break
 
     if PEXELS_API_KEY:
         try:
             res = requests.get(
                 "https://api.pexels.com/v1/search",
                 headers={"Authorization": PEXELS_API_KEY},
-                params={"query": query, "per_page": 10},
+                params={"query": query, "per_page": 15},
                 timeout=10,
             )
             if res.status_code == 200:
                 photos = res.json().get("photos", [])
-                if photos:
-                    return random.choice(photos)["src"]["large2x"]
+                fresh = [p for p in photos if f"pp{p.get('id')}" not in used] or photos
+                if fresh:
+                    chosen = random.choice(fresh)
+                    return f"pp{chosen.get('id')}", chosen["src"]["large2x"]
         except Exception as e:
             print(f"Pexels hatası: {e}")
 
-    return None
+    return None, None
 
 
-def fetch_media(query: str):
-    """(url, is_video). Önce video aranır, bulunamazsa resme geçilir."""
-    url = fetch_hd_video_url(query)
-    if url:
-        return url, True
-    return fetch_hd_image_url(query), False
+def fetch_hd_video_url(query: str = "nature landscape") -> str:
+    """Eski imza: Pexels'ten HD MP4 linki ya da None."""
+    return _pexels_video(query, set())[1]
+
+
+def fetch_hd_image_url(query: str = "nature landscape"):
+    """Eski imza: görsel linki ya da None."""
+    return _fetch_image(query, set())[1]
+
+
+def fetch_media(query: str, st: dict = None, specific: str = None):
+    """(url, is_video). Önce konuya özel anahtar kelime (modelin verdiği, ör. 'humpback whale'), olmazsa kategori sorgusu.
+    Her sorguda önce video, sonra resim aranır. st verilirse kullanılan medya kaydedilir ve tekrar seçilmez."""
+    used = set(st.get("media_used", [])) if st is not None else set()
+    for q in (specific, query):
+        if not q:
+            continue
+        for fetcher, is_video in ((_pexels_video, True), (_fetch_image, False)):
+            mid, url = fetcher(q, used)
+            if url:
+                if st is not None and mid:
+                    st.setdefault("media_used", []).append(mid)
+                return url, is_video
+    return None, False
 
 
 def get_weather_info() -> str:
@@ -860,7 +1262,8 @@ def get_x_channel_id() -> str:
 
 
 def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=False,
-                       reply=None, delay_min: int = 3) -> str:
+                       reply=None, delay_min: int = 3, thread=None) -> str:
+    """reply: tek alt yorum (eski kullanım). thread: ek tweet listesi (mini thread). İkisi de ana tweetin altına zincirlenir."""
     due = (datetime.now(timezone.utc) + timedelta(minutes=delay_min)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     assets = ""
     metadata = ""
@@ -868,13 +1271,14 @@ def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=Fals
     # Video ise GraphQL nesnesi 'video', resim ise 'image' olur
     media_asset_key = "video" if is_video else "image"
 
-    if reply:
+    followups = ([reply] if reply else []) + [t for t in (thread or []) if t]
+    if followups:
         first = "{ text: %s" % json.dumps(text, ensure_ascii=False)
         if media_url:
             first += f" assets: [{{ {media_asset_key}: {{ url: %s }} }}]" % json.dumps(media_url)
         first += " }"
-        second = "{ text: %s }" % json.dumps(reply, ensure_ascii=False)
-        metadata = "metadata: { twitter: { thread: [ %s %s ] } }" % (first, second)
+        rest = " ".join("{ text: %s }" % json.dumps(t, ensure_ascii=False) for t in followups)
+        metadata = "metadata: { twitter: { thread: [ %s %s ] } }" % (first, rest)
     elif media_url:
         assets = f"assets: [{{ {media_asset_key}: {{ url: %s }} }}]" % json.dumps(media_url)
 
@@ -901,25 +1305,27 @@ def create_buffer_post(channel_id: str, text: str, media_url=None, is_video=Fals
     raise RuntimeError(result.get("message", "Bilinmeyen Buffer hatası"))
 
 
-def post_to_x(text: str, media_url=None, is_video=False, reply=None, delay_min: int = 3):
+def post_to_x(text: str, media_url=None, is_video=False, reply=None, delay_min: int = 3, thread=None):
+    """(başarı, sebep, alt_tweetler_gitti_mi). Sırayla dener: medya+alt tweetler -> medya -> sadece metin."""
     if not BUFFER_API_KEY:
         return False, "BUFFER_API_KEY eksik.", False
     try:
         channel_id = get_x_channel_id()
+        followups = ([reply] if reply else []) + [t for t in (thread or []) if t]
         attempts = []
-        if reply:
-            attempts.append((media_url, reply))
+        if followups:
+            attempts.append((media_url, followups))
         attempts.append((media_url, None))
         if media_url:
             attempts.append((None, None))
 
         last_error = None
-        for med, rp in attempts:
+        for med, fu in attempts:
             try:
                 post_id = create_buffer_post(channel_id, text, med, is_video=is_video and bool(med),
-                                             reply=rp, delay_min=delay_min)
-                print(f"✅ Buffer'a eklendi. Post ID: {post_id} | Video: {is_video and bool(med)} | yorum: {bool(rp)}")
-                return True, "OK", bool(rp)
+                                             delay_min=delay_min, thread=fu)
+                print(f"✅ Buffer'a eklendi. Post ID: {post_id} | Video: {is_video and bool(med)} | alt tweet: {len(fu or [])}")
+                return True, "OK", bool(fu)
             except RuntimeError as e:
                 print(f"Deneme başarısız: {e}")
                 last_error = e
@@ -1053,19 +1459,23 @@ def send_telegram_help():
     help_text = (
         "📖 *DOĞA BOTU YARDIM VE KOMUT REHBERİ*\n\n"
         "🤖 *Bot Nasıl Çalışır?*\n"
-        "• Bot otomatik saatlerde Gemini/Groq/OpenRouter AI kullanarak doğa ile ilgili tweetler üretir.\n"
-        "• Görseller Unsplash/Pexels HD kütüphanelerinden çekilir.\n"
-        "• Tweet ve altında otomatik soru-yorum Buffer üzerinden X'e iletilir.\n\n"
+        "• Konu için Wikipedia'dan gerçek bir özet çekilir; Gemini/Groq/OpenRouter sadece o metindeki bilgiyle yazar.\n"
+        "• İkinci bir model (farklı sağlayıcıdan) tweeti kaynağa karşı denetler ve ilk satıra 1-10 hook puanı verir; zayıfsa yeniden yazılır.\n"
+        "• Görsel/video, modelin verdiği konuya özel anahtar kelimeyle (ör. humpback whale) Pexels/Unsplash'ten çekilir.\n"
+        "• Tweet ve altındaki soru/kaynak linki Buffer üzerinden X'e iletilir.\n\n"
         "⚡ *Mevcut Komutlar:*\n"
         "• `/paylas` : Hemen bir tweet hazırlar ve Buffer'a ekler.\n"
-        "• `/etkilesim` : Canlı linkler, tek dokunuşla takip bağlantıları ve hazır akıllı yorum üretir.\n"
+        "• `/etkilesim` : Canlı linkler, tek dokunuşla takip bağlantıları ve 3 hazır yorum önerisi üretir.\n"
         "• `/cevap <gelen yorum>` : Gelen yoruma hazır cevap önerir.\n"
         "• `/yardim` : Bu yardım rehberini gösterir.\n\n"
-        "🗓️ *Haftalık seri:* Pzt Marine Monday, Sal Tree Tuesday, Çar Wild Wednesday, "
-        "Per Feathered Thursday, Cum Flora Friday, Cmt Sky Saturday, Paz Small World Sunday.\n"
-        "🧠 *Quiz:* Sal/Per/Cmt akşamı; cevap birkaç saat sonra ayrı tweet olarak çıkar.\n\n"
-        "🔍 *İddia kontrolü:* Her tweet paylaşılmadan önce ikinci bir model sayı ve olgu iddialarını denetler; şüpheli çıkarsa paylaşılmaz, sana uyarı düşer.\n"
-        "♻️ *Tekrar engeli:* Geçmiş tweetlere benzeyen içerik atılmaz, yenisi üretilir.\n\n"
+        "🗓️ *Haftalık ritim:* Sabah günün serisi (Pzt Marine Monday, Sal Tree Tuesday, Çar Wild Wednesday, "
+        "Per Feathered Thursday, Cum Flora Friday, Cmt Sky Saturday, Paz Small World Sunday). "
+        "Akşam: Sal/Per/Cmt quiz, Çar myth vs fact, Paz mini thread, Pzt/Cum tek bilgi.\n"
+        "🧠 *Quiz:* Cevap birkaç saat sonra ayrı tweet olarak çıkar.\n\n"
+        "🔍 *İddia kontrolü:* Kaynakta olmayan sayı/isim/iddia varsa tweet paylaşılmaz, yenisi yazılır; hepsi şüpheli çıkarsa sana uyarı düşer.\n"
+        "♻️ *Tekrar engeli:* Geçmiş tweetlere benzeyen içerik ve daha önce kullanılan kaynak/görsel tekrar seçilmez.\n"
+        "📈 *Öğrenme:* X Analytics CSV'sini `python nature_bot.py --import-metrics dosya.csv` ile yüklersen bot en iyi giden "
+        "konu ve hook kalıplarını daha sık seçer.\n\n"
         "🛡️ *Neden API Kredisi Harcanmaz?*\n"
         "Paylaşımlar Buffer API üzerinden yapıldığı için hesabın X API sınırlarına takılmaz ve tamamen ücretsizdir.\n\n"
         "🤖 *Hesabı otomatik olarak etiketle:* X > Ayarlar > Hesabın > Hesap bilgileri > Otomasyon.\n"
@@ -1076,24 +1486,34 @@ def send_telegram_help():
 
 def send_interaction_reminder(tweet_text: str = None):
     """/etkilesim komutu çağrıldığında veya paylaşımdan sonra gecikmeyle tetiklenir.
-    Beğeni/takip ELLE yapılır; bot sadece hazır yorum ve tek dokunuşluk linkleri verir."""
+    Beğeni/takip ELLE yapılır (otomatik beğeni/takip X kurallarına aykırıdır, hesap riski taşır);
+    bot hazır yorum seçenekleri ve tek dokunuşluk linkleri verir."""
     context = tweet_text if tweet_text else "Nature, wildlife, and serene natural landscapes"
-
     prompt = (
-        f"Generate a thoughtful, engaging, short comment (max 100 chars) that I can post on other popular nature tweets. "
-        f"Topic context: '{context[:100]}'. Do not use hashtags."
+        "Write 3 different short comments (each max 100 characters, no hashtags) that I can post on other popular "
+        f"nature tweets. Topic context: '{context[:100]}'. Angles: 1) a thoughtful question, 2) a warm appreciation, "
+        "3) a short curious reaction. Do not state any facts, numbers or names. "
+        'Return ONLY valid JSON: {"comments": ["...", "...", "..."]}.'
     )
-    suggested_comment = call_llms(prompt) or "Incredible capture! Nature never ceases to amaze us. 🌿"
-    suggested_comment = suggested_comment.strip().strip('"').strip().replace("`", "'")
+    data = call_llms_json(prompt, temperature=0.9, tier="fast")
+    comments = []
+    if data:
+        comments = [str(c).strip().strip('"').replace("`", "'") for c in (data.get("comments") or [])]
+        comments = [c for c in comments if 5 <= len(c) <= 140][:3]
+    if not comments:
+        comments = ["Incredible capture! Nature never ceases to amaze us. 🌿",
+                    "This is why I love watching the natural world. 🍃",
+                    "What a beautiful reminder of how much there is to discover. 🌍"]
+    comment_lines = "\n".join(f"`{c}`" for c in comments)
 
     targets = random.sample(TARGET_ACCOUNTS, k=min(3, len(TARGET_ACCOUNTS)))
     follow_lines = "\n".join(f"• [@{a}](https://x.com/intent/follow?screen_name={a})" for a in targets)
 
     reminder_msg = (
         "🚀 *YARI OTOMATİK ETKİLEŞİM MODÜLÜ*\n\n"
-        f"💡 *Önerilen Akıllı Yorum:*\n`{suggested_comment}`\n\n"
-        "1️⃣ *Canlı Doğa Akışı:*\n🔗 [Canlı #Nature Tweetleri](https://x.com/search?q=%23Nature%20OR%20%23Wildlife%20min_faves%3A10&f=live)\n"
-        "_(İlk 2-3 tweet'i beğen ve yukarıdaki yorumu yap)_\n\n"
+        f"💡 *Önerilen Yorumlar (birini seç):*\n{comment_lines}\n\n"
+        "1️⃣ *Canlı Doğa Akışı:*\n🔗 [Canlı #Nature Tweetleri](https://x.com/search?q=%23Nature%20OR%20%23Wildlife%20min_faves%3A20%20lang%3Aen%20-filter%3Areplies&f=live)\n"
+        "_(İlk 2-3 tweet'i beğen ve yukarıdaki yorumlardan birini yaz; yeni atılmış tweetlere yorum daha çok görünür)_\n\n"
         "2️⃣ *Tek Dokunuşla Takip (onay ekranı açılır):*\n"
         f"{follow_lines}\n\n"
         "3️⃣ *Sana gelen yanıtlar:*\n🔗 [Bildirimler](https://x.com/notifications/mentions)\n"
@@ -1136,26 +1556,34 @@ def check_telegram_updates():
 #  ANA İŞ
 # ============================================================
 def choose_mode(now: datetime) -> str:
-    if POST_MODE in ("series", "quiz", "random"):
+    if POST_MODE in ("series", "quiz", "random", "myth", "thread"):
         return POST_MODE
     if now.hour >= 16:
-        # Salı, Perşembe, Cumartesi akşamı quiz; diğer akşamlar eski usul rastgele konu
-        return "quiz" if now.weekday() in (1, 3, 5) else "random"
+        wd = now.weekday()
+        if wd in (1, 3, 5):   # Salı, Perşembe, Cumartesi akşamı quiz
+            return "quiz"
+        if wd == 2:           # Çarşamba akşamı myth vs fact
+            return "myth"
+        if wd == 6:           # Pazar akşamı mini thread
+            return "thread"
+        return "random"       # Pazartesi, Cuma akşamı tek bilgi
     return "series"
 
 
-def build_content(mode: str, st: dict, now: datetime) -> dict:
+def build_content(mode: str, st: dict, now: datetime, cat=None, src=None, hook_style=None, feedback: str = "") -> dict:
     """Bir paylaşımın metnini hazırlar. Medya, metin kabul edildikten sonra çekilir."""
-    c = {"answer_post": None, "reply_q": None, "cat": None, "check_text": None}
+    c = {"mode": mode, "answer_post": None, "followups": [], "cat": None, "check_text": None,
+         "keyword": None, "src": None, "hook_style": None, "family": None}
     if mode == "weather":
         c["text"] = get_weather_info()
         c["query"] = "morning sunrise nature"
         c["title"] = "☀️ Sabah Hava Durumu Buffer'a eklendi"
         c["err_title"] = "❌ Hava Durumu Hata:"
     elif mode == "quiz":
-        quiz = generate_quiz(st)
+        quiz = generate_quiz(st, src, cat)
+        c["src"] = src if quiz.get("used_src") else None
         c["text"] = format_quiz_tweet(quiz)
-        c["answer_post"] = format_quiz_answer(quiz)
+        c["answer_post"] = format_quiz_answer(quiz, c["src"]["url"] if c["src"] else None)
         c["check_text"] = (
             f"Quiz question: {quiz['q']}\n"
             + "\n".join(f"{LETTERS[i]}) {o}" for i, o in enumerate(quiz["options"]))
@@ -1163,26 +1591,22 @@ def build_content(mode: str, st: dict, now: datetime) -> dict:
             f"Explanation: {quiz['explain']}"
         )
         c["cat"] = quiz["cat"]
+        c["keyword"] = quiz.get("keyword")
         c["query"] = TOPICS.get(quiz["cat"], TOPICS["animals"])[1]
         c["title"] = f"🧠 Quiz ({quiz['cat']}) Buffer'a eklendi"
         c["err_title"] = "❌ Quiz Hatası:"
-    elif mode == "series":
-        series = SERIES[now.weekday()]
-        text, cat = generate_series_tweet(series["cat"], series, st)
-        c["text"], c["cat"] = text, cat
-        c["check_text"] = text
-        c["query"] = TOPICS[cat][1]
-        c["reply_q"] = generate_question(text)
-        c["title"] = f"{series['name']} ({cat}) Buffer'a eklendi"
-        c["err_title"] = "❌ Paylaşım Hatası:"
-    else:  # random = eski davranış
-        cat0 = random.choice(TOPIC_POOL)
-        text, cat = generate_random_tweet(cat0, st)
-        c["text"], c["cat"] = text, cat
-        c["check_text"] = text
-        c["query"] = TOPICS[cat][1]
-        c["reply_q"] = generate_question(text)
-        c["title"] = f"İçerik ({cat}) Buffer'a eklendi"
+    else:
+        kind = mode if mode in ("series", "myth", "thread") else "fact"
+        series = SERIES[now.weekday()] if kind == "series" else None
+        post = generate_post(kind, cat, st, src, series, hook_style, feedback)
+        c.update(text=post["text"], followups=post["followups"], cat=post["cat"], check_text=post["check_text"],
+                 keyword=post["keyword"], src=post["src"], hook_style=post["hook_style"], family=post["family"])
+        c["query"] = TOPICS[post["cat"]][1]
+        if post["kind"] == "series" and series:
+            label = series["name"]
+        else:
+            label = {"myth": "🔎 Myth vs Fact", "thread": "🧵 Thread"}.get(post["kind"], "İçerik")
+        c["title"] = f"{label} ({post['cat']}) Buffer'a eklendi"
         c["err_title"] = "❌ Paylaşım Hatası:"
     return c
 
@@ -1201,23 +1625,40 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
     else:
         mode = choose_mode(now)
 
-    # Tekrar / benzer / şüpheli içerik çıkarsa en fazla MAX_ATTEMPTS kez yeniden üret
+    # Tekrar / benzer / şüpheli içerik çıkarsa en fazla MAX_ATTEMPTS kez yeniden üret.
+    #  - tekrar/benzer: yeni konu + yeni kaynak
+    #  - şüpheli / zayıf hook: AYNI kaynakla, doğrulayıcının notlarıyla yeniden yaz (Shorts'taki review döngüsü)
     content = None
-    flagged = []  # (metin, sebepler)
+    best = None      # kapıları geçen en yüksek hook'lu taslak
+    flagged = []     # (metin, sebepler)
+    cat = src = hook_style = None
+    feedback = ""
+    fresh = True
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        cand = build_content(mode, st, now)
+        if fresh:
+            cat = plan_category(mode, st, now)
+            src = pick_source(cat, st) if cat else None
+            hook_style = choose_hook_style(st)
+            fresh = False
+        cand = build_content(mode, st, now, cat, src, hook_style, feedback)
+        feedback = ""
         if is_duplicate(st, cand["text"]):
             print(f"🔁 ({attempt}/{MAX_ATTEMPTS}) Aynı içerik daha önce paylaşılmış, yenisi üretiliyor...")
+            fresh = True
             continue
         sim = find_similar(st, cand["text"])
         if sim:
             print(f"🔁 ({attempt}/{MAX_ATTEMPTS}) Geçmiş bir paylaşıma %{int(sim[0] * 100)} benziyor, yenisi üretiliyor...")
+            fresh = True
             continue
+
+        hook = None
         if FACT_CHECK and cand.get("check_text"):
-            status, issues = fact_check(cand["check_text"])
+            status, hook, issues = review_draft(cand["check_text"], cand.get("src"), cand.get("family"))
             if status == "suspicious":
                 print(f"⚠️ ({attempt}/{MAX_ATTEMPTS}) İddia kontrolü şüpheli buldu: {issues}")
                 flagged.append((cand["text"], issues))
+                feedback = "The previous draft had these problems, fix them and stay strictly within the source: " + "; ".join(issues)
                 continue
             if status == "unverified":
                 if FACT_CHECK_STRICT:
@@ -1226,9 +1667,20 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
                     continue
                 cand["verify_note"] = "⚠️ İddia kontrolü yapılamadı (doğrulayıcı model yanıt vermedi), elle bakmak isteyebilirsin."
             else:
-                cand["verify_note"] = "🔍 İddia kontrolü: geçti ✅"
-        content = cand
+                cand["verify_note"] = "🔍 İddia kontrolü: geçti ✅" + (f" | hook {hook}/10" if hook else "")
+
+        cand["hook"] = hook
+        if best is None or (hook or 0) > (best.get("hook") or 0):
+            best = cand
+        if hook is not None and hook < HOOK_MIN and attempt < MAX_ATTEMPTS:
+            print(f"✍️ ({attempt}/{MAX_ATTEMPTS}) Hook zayıf ({hook}/10), daha çarpıcı yeniden yazılıyor...")
+            feedback = (f"The previous draft's opening line scored only {hook}/10 for scroll-stopping power. "
+                        "Rewrite it with a more specific, surprising first line. " + "; ".join(issues))
+            continue
+        content = best if (hook is not None and hook < HOOK_MIN) else cand
         break
+    if content is None and best is not None:
+        content = best
     if content is None:
         if flagged:
             lines = ["🛑 İddia kontrolü yüzünden bu tur paylaşım yapılmadı."]
@@ -1242,28 +1694,36 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
         return True
 
     text = content["text"]
-    question = content["reply_q"]
+    followups = content["followups"]
     answer_post = content["answer_post"]
     err_title = content["err_title"]
 
-    # Medya, METNİN gerçek konusuna göre çekilir (görsel-metin uyumsuzluğunu önler)
-    media_url, is_video = fetch_media(content["query"])
+    # Medya, METNİN gerçek konusuna göre çekilir: önce modelin verdiği özel anahtar kelime, olmazsa kategori sorgusu
+    media_url, is_video = fetch_media(content["query"], st=st, specific=content.get("keyword"))
     media_type = "🎥 Video" if is_video else "📸 Görsel"
     title = f"{media_type} {content['title']}"
 
-    success, reason, replied = post_to_x(text, media_url, is_video=is_video, reply=question)
+    # Her tweet tam aynı dakikada çıkmasın: Buffer gecikmesine 0..POST_JITTER_MAX dk eklenir
+    delay = 3 + random.randint(0, max(0, POST_JITTER_MAX))
+    success, reason, replied = post_to_x(text, media_url, is_video=is_video, delay_min=delay, thread=followups)
 
     if success:
         st.setdefault("recent_texts", []).append(text[:60])
-        record_post(st, text)
+        src_title = (content.get("src") or {}).get("title")
+        if src_title:
+            st.setdefault("used_sources", []).append(src_title)
+        record_post(st, text, meta={"cat": content.get("cat"), "mode": mode, "hook_style": content.get("hook_style"),
+                                    "hook": content.get("hook"), "source": src_title})
 
         msg = f"{title}\n\n{text}"
         if content.get("verify_note"):
             msg += f"\n\n{content['verify_note']}"
-        if question:
-            msg += f"\n\n💬 Yorum: {question}"
+        if src_title:
+            msg += f"\n📚 Kaynak: {src_title}"
+        if followups:
+            msg += "\n\n💬 Alt tweet(ler):\n" + "\n\n".join(f"↳ {f}" for f in followups)
             if not replied:
-                msg += "\n\n⚠️ Yorum eklenemedi, sadece ana tweet gitti (loga bak)."
+                msg += "\n\n⚠️ Alt tweet/yorum eklenemedi, sadece ana tweet gitti (loga bak)."
 
         # Quiz cevabı: birkaç saat sonra ayrı tweet olarak zamanlanır
         if answer_post:
@@ -1274,19 +1734,20 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
                 msg += f"\n\n⚠️ Cevap tweeti zamanlanamadı: {reason2}"
         notify_telegram(msg)
 
+        # Hatırlatma, tweetin YAYINLANMASINDAN (Buffer gecikmesi dahil) ENGAGE_DELAY_SEC sonra gelir
+        remind_after = ENGAGE_DELAY_SEC + delay * 60
         if SKIP_WAIT or ENGAGE_DELAY_SEC <= 0:
             print("⏭️ Etkileşim hatırlatması atlandı (SKIP_WAIT / ENGAGE_DELAY_SEC).")
         elif wait:
-            minutes = ENGAGE_DELAY_SEC // 60
-            print(f"⏳ Paylaşım yapıldı. Etkileşim bildirimi için {minutes} dk bekleniyor...")
-            time.sleep(ENGAGE_DELAY_SEC)
+            print(f"⏳ Paylaşım yapıldı. Etkileşim bildirimi için {remind_after // 60} dk bekleniyor...")
+            time.sleep(remind_after)
             send_interaction_reminder(text)
             print("✅ Yarı otomatik etkileşim bildirimi Telegram'a gönderildi.")
         elif background_reminder:
-            timer = threading.Timer(ENGAGE_DELAY_SEC, send_interaction_reminder, args=(text,))
+            timer = threading.Timer(remind_after, send_interaction_reminder, args=(text,))
             timer.daemon = True
             timer.start()
-            print(f"⏳ Etkileşim hatırlatması {ENGAGE_DELAY_SEC // 60} dk sonra için zamanlandı.")
+            print(f"⏳ Etkileşim hatırlatması {remind_after // 60} dk sonra için zamanlandı.")
         return True
 
     notify_telegram(f"{err_title} {reason}")
@@ -1303,6 +1764,15 @@ if __name__ == "__main__":
         body = " ".join(sys.argv[sys.argv.index("--suggest") + 1:]).strip()
         if body:
             print(send_reply_suggestion(body))
+        sys.exit(0)
+
+    if "--import-metrics" in sys.argv:
+        # Performans geri beslemesi: python nature_bot.py --import-metrics export.csv
+        idx = sys.argv.index("--import-metrics")
+        if idx + 1 >= len(sys.argv):
+            print("Kullanım: python nature_bot.py --import-metrics dosya.csv")
+            sys.exit(2)
+        print(f"{import_metrics(sys.argv[idx + 1])} paylaşım metrikle eşleşti ve skorlandı.")
         sys.exit(0)
 
     if "--reply" in sys.argv:
