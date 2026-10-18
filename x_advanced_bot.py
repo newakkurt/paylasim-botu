@@ -71,6 +71,19 @@ def run_advanced_bot(auth_token, ct0):
 
     driver.quit()
 
+import os
+
 if __name__ == "__main__":
-    # Bot çalıştırma tetikleyicisi
-    pass
+    # GitHub Secrets veya ortam değişkenlerinden çerezleri alıyoruz
+    auth_token = os.getenv("X_AUTH_TOKEN")
+    ct0 = os.getenv("X_CT0")
+    
+    if auth_token and ct0:
+        print("🚀 X Advanced Bot başlatılıyor...")
+        try:
+            run_advanced_bot(auth_token, ct0)
+            print("✅ X Advanced Bot başarıyla tamamlandı.")
+        except Exception as e:
+            print(f"❌ Bot çalışırken hata oluştu: {e}")
+    else:
+        print("❌ HATA: X_AUTH_TOKEN veya X_CT0 ortam değişkeni bulunamadı!")
