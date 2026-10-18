@@ -6,8 +6,6 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 # --- YAPILANDIRMA ---
 TARGET_TOP_ACCOUNTS = ["elonmusk", "neymarjr", "cnn", "trthaber"] # Hedef büyük hesaplar
@@ -20,14 +18,30 @@ def parse_follower_count(text):
     """
     text = text.upper().replace(',', '').replace('.', '')
     try:
-        if 'K' in text:
-            return float(re.sub(r'[^\d.]', '', text.replace('K', ''))) * 1000
-        elif 'M' in text:
-            return float(re.sub(r'[^\d.]', '', text.replace('M', ''))) * 1000000
+        if 'K' in text or 'B' in text:
+            return float(re.sub(r'[^\d.]', '', text.replace('K', '').replace('B', ''))) * 1000
+        elif 'M' in text or 'MN' in text:
+            return float(re.sub(r'[^\d.]', '', text.replace('M', '').replace('MN', ''))) * 1000000
         else:
             return float(re.sub(r'[^\d.]', '', text))
     except:
         return 0
+
+def get_follower_from_meta(driver):
+    """
+    Headless modda DOM'un takılmasını önlemek için sayfanın arka plan meta açıklamasından takipçi sayısını çeker.
+    """
+    try:
+        meta_elem = driver.find_element(By.XPATH, "//meta[@name='description']")
+        content = meta_elem.get_attribute("content")
+        # Örnek meta içeriği: "The latest posts from @username ... 12.5K Followers, 500 Following"
+        match = re.search(r'([\d.,]+\s*[KMABkmab]?)\s*(?:Takipçi|Followers)', content, re.IGNORECASE)
+        if match:
+            raw_val = match.group(1)
+            return parse_follower_count(raw_val), raw_val
+    except:
+        pass
+    return 0, "0"
 
 def run_advanced_bot(auth_token, ct0):
     options = webdriver.ChromeOptions()
@@ -84,42 +98,53 @@ def run_advanced_bot(auth_token, ct0):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3)
 
-        # Doğru XPath sözdizimi ile kullanıcı hücrelerini bulma
+        # Kullanıcı hücrelerini bulma
         user_cells = driver.find_elements(By.XPATH, "//*[@data-testid='UserCell']")
         print(f"👥 @{target} profilinde {len(user_cells)} kullanıcı bulundu.")
 
+        usernames = []
         for cell in user_cells:
+            try:
+                username_elem = cell.find_element(By.XPATH, ".//a[@role='link']")
+                href = username_elem.get_attribute("href")
+                username = href.split("/")[-1]
+                if username and username not in usernames:
+                    usernames.append(username)
+            except:
+                continue
+
+        for username in usernames:
             if followed_count >= DAILY_LIMIT:
                 break
 
             try:
-                # Kullanıcı adını yakalama
-                username_elem = cell.find_element(By.XPATH, ".//a[@role='link']")
-                username = username_elem.get_attribute("href").split("/")[-1]
-            except:
-                continue
+                # Kullanıcı profiline gidip takipçi sayısını doğrulama
+                driver.get(f"https://x.com/{username}")
+                time.sleep(4)
 
-            # Takip et butonunu bulma
-            try:
-                follow_button = cell.find_element(By.XPATH, ".//button[@data-testid and (contains(@data-testid, '-follow'))]")
-                button_text = follow_button.text.lower()
-                
-                # Zaten takip ediliyorsa atla
-                if "takip ediyor" in button_text or "following" in button_text:
-                    continue
-            except:
-                continue
+                follower_count, follower_text = get_follower_from_meta(driver)
+                print(f"👤 @{username} | Takipçi: {follower_text} ({follower_count})")
 
-            # Takip et butonuna basılıyor
-            try:
-                follow_button.click()
-                followed_count += 1
-                print(f"✅ [{followed_count}/{DAILY_LIMIT}] Başarıyla takip edildi: @{username}")
-                
-                # İnsan taklidi için rastgele bekleme
-                time.sleep(random.uniform(15, 30))
+                if follower_count >= MIN_FOLLOWERS:
+                    try:
+                        follow_button = driver.find_element(By.XPATH, "//button[@data-testid and (contains(@data-testid, '-follow'))]")
+                        button_text = follow_button.text.lower()
+                        
+                        if "takip ediyor" in button_text or "following" in button_text:
+                            print(f"ℹ️ Zaten takip ediliyor: @{username}")
+                        else:
+                            follow_button.click()
+                            followed_count += 1
+                            print(f"✅ [{followed_count}/{DAILY_LIMIT}] Başarıyla takip edildi: @{username} (Takipçi: {follower_text})")
+                            time.sleep(random.uniform(15, 30))
+                    except Exception as btn_err:
+                        print(f"⚠️ Takip et butonu bulunamadı: {btn_err}")
+                else:
+                    print(f"⏩ Kriter altı hesap ({follower_count} < {MIN_FOLLOWERS}), atlanıyor: @{username}")
+
             except Exception as e:
-                print(f"⚠️ Takip et butonuna tıklanamadı: {e}")
+                print(f"⚠️ @{username} incelenirken hata oluştu: {e}")
+                continue
 
     driver.quit()
 
