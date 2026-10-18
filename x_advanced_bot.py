@@ -31,8 +31,12 @@ def check_and_send_dm(driver, new_follower_username, message):
     Geri takip eden yeni kullanıcıya otomatik DM atar.
     """
     try:
-        driver.get(f"https://x.com/messages/compose")
-        time.sleep(3)
+    driver.get("https://x.com")
+    time.sleep(2)
+    driver.add_cookie({'name': 'auth_token', 'value': auth_token})
+    driver.add_cookie({'name': 'ct0', 'value': ct0})
+    driver.refresh()
+    time.sleep(3)
         # DM gönderme adımları (Arayüz elementlerine göre yönlendirilir)
         print(f"[DM] @{new_follower_username} kullanıcısına otomatik mesaj gönderildi.")
     except Exception as e:
