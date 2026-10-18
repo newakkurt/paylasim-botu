@@ -84,8 +84,8 @@ def run_advanced_bot(auth_token, ct0):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3)
 
-        # Kullanıcı hücrelerini bulma
-        user_cells = driver.find_elements(By.XPATH, "//[data-testid='UserCell']")
+        # Doğru XPath sözdizimi ile kullanıcı hücrelerini bulma
+        user_cells = driver.find_elements(By.XPATH, "//*[@data-testid='UserCell']")
         print(f"👥 @{target} profilinde {len(user_cells)} kullanıcı bulundu.")
 
         for cell in user_cells:
@@ -94,8 +94,8 @@ def run_advanced_bot(auth_token, ct0):
 
             try:
                 # Kullanıcı adını yakalama
-                username_elem = cell.find_element(By.XPATH, ".//[starts-with(@href, '/') and not(contains(@href, '/'))]")
-                username = username_elem.text
+                username_elem = cell.find_element(By.XPATH, ".//a[@role='link']")
+                username = username_elem.get_attribute("href").split("/")[-1]
             except:
                 continue
 
@@ -110,11 +110,11 @@ def run_advanced_bot(auth_token, ct0):
             except:
                 continue
 
-            # Takipçi kriteri sağlandığı için takip et butonuna basılıyor
+            # Takip et butonuna basılıyor
             try:
                 follow_button.click()
                 followed_count += 1
-                print(f"✅ [{followed_count}/{DAILY_LIMIT}] Başarıyla takip edildi: {username}")
+                print(f"✅ [{followed_count}/{DAILY_LIMIT}] Başarıyla takip edildi: @{username}")
                 
                 # İnsan taklidi için rastgele bekleme
                 time.sleep(random.uniform(15, 30))
