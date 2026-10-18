@@ -13,9 +13,6 @@ DAILY_LIMIT = 70
 MIN_FOLLOWERS = 5000  # Sadece 5000 ve üzeri takipçisi olan gerçek hesaplar
 
 def parse_follower_count(text):
-    """
-    X üzerindeki takipçi metnini (örn: '12.5K', '1.2M', '4,500') sayıya çevirir.
-    """
     text = text.upper().replace(',', '').replace('.', '')
     try:
         if 'K' in text:
@@ -29,7 +26,6 @@ def parse_follower_count(text):
 
 def run_advanced_bot(auth_token, ct0):
     options = webdriver.ChromeOptions()
-    # GitHub sunucusunda arayüz olmadığı için zorunlu argümanlar:
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -37,7 +33,6 @@ def run_advanced_bot(auth_token, ct0):
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    # CDP ile çerez enjeksiyonu ve oturum açma
     try:
         driver.get("https://x.com")
         time.sleep(2)
@@ -77,7 +72,6 @@ def run_advanced_bot(auth_token, ct0):
         driver.get(f"https://x.com/{target}/followers")
         time.sleep(6)
 
-        # Sayfayı aşağı kaydırarak kullanıcı kartlarını yükleme
         for _ in range(2):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3)
@@ -101,19 +95,26 @@ def run_advanced_bot(auth_token, ct0):
                 break
 
             try:
-                # Kullanıcı profiline gidip takipçi sayısını doğrulama
                 driver.get(f"https://x.com/{username}")
                 time.sleep(3)
 
-                # Profil sayfasından takipçi sayısını çekme
-                follower_elem = driver.find_element(By.XPATH, "//a[contains(@href, '/verified_followers') or contains(@href, '/followers')]//span[1]")
-                follower_text = follower_elem.text
-                follower_count = parse_follower_count(follower_text)
+                follower_count = 0
+                follower_text = "0"
+                try:
+                    follower_elem = driver.find_element(By.XPATH, "//a[contains(@href, '/followers')]/span[1]/span")
+                    follower_text = follower_elem.text
+                    follower_count = parse_follower_count(follower_text)
+                except:
+                    try:
+                        follower_elem = driver.find_element(By.XPATH, "//a[contains(@href, '/verified_followers')]/span[1]/span")
+                        follower_text = follower_elem.text
+                        follower_count = parse_follower_count(follower_text)
+                    except:
+                        pass
 
                 print(f"👤 @{username} | Takipçi: {follower_text}")
 
                 if follower_count >= MIN_FOLLOWERS:
-                    # Takip et butonunu bulma ve tıklama
                     try:
                         follow_button = driver.find_element(By.XPATH, "//button[@data-testid and (contains(@data-testid, '-follow'))]")
                         button_text = follow_button.text.lower()
