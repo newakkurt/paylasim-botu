@@ -5,12 +5,20 @@ import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # --- YAPILANDIRMA ---
 TARGET_TOP_ACCOUNTS = ["elonmusk", "neymarjr", "cnn", "trthaber"]
 DAILY_LIMIT = 70
 MIN_FOLLOWERS = 5000  # Sadece 5000 ve üzeri takipçisi olan hesaplar takip edilir
+PAGE_WAIT = 20        # Profil elemanları için maksimum bekleme (sn)
+
+FOLLOWERS_LINK_XPATH = (
+    "//a[contains(@href, '/verified_followers') or "
+    "substring(@href, string-length(@href) - 9) = '/followers']"
+)
 
 
 def parse_follower_count(text):
@@ -22,7 +30,6 @@ def parse_follower_count(text):
     text = text.strip().upper().replace("\n", " ")
     m = re.match(r"([\d.,]+)\s*(MN|MİLYON|MILYON|BİN|BIN|K|M|B)?(?![A-ZÇĞİÖŞÜ])", text)
     if not m:
-        # Ek yazı (Followers/Takipçi) yüzünden eşleşmediyse sadece sayıyı dene
         m = re.match(r"([\d.,]+)", text)
         if not m:
             return 0
@@ -33,15 +40,47 @@ def parse_follower_count(text):
     num = m.group(1)
     try:
         if suffix:
-            # Ondalık ayraç olarak nokta veya virgül gelebilir: 12.5K / 12,5 B
             value = float(num.replace(",", "."))
             if suffix in ("K", "B", "BIN", "BİN"):
                 return value * 1_000
             return value * 1_000_000  # M, MN, MILYON
-        # Ek yoksa ayraçlar binlik ayraçtır: 4,500 / 4.500
         return float(re.sub(r"[.,]", "", num))
     except ValueError:
         return 0
+
+
+def debug_page(driver, username):
+    """Hata anında sayfada ne olduğunu loga yazar."""
+    try:
+        body = driver.find_element(By.TAG_NAME, "body").text.replace("\n", " | ")[:250]
+    except Exception:
+        body = "(body okunamadı)"
+    print(f"🧪 DEBUG @{username} | url={driver.current_url} | title={driver.title} | body={body}")
+
+
+def get_follower_text(driver, username):
+    """
+    Profile gider, takipçi linkini gerçekten görünene kadar bekler.
+    Bulamazsa sayfayı bir kez yenileyip tekrar dener. Bulamazsa None döner.
+    """
+    for attempt in (1, 2):
+        driver.get(f"https://x.com/{username}")
+        try:
+            elem = WebDriverWait(driver, PAGE_WAIT).until(
+                EC.presence_of_element_located((By.XPATH, FOLLOWERS_LINK_XPATH))
+            )
+            # Metin render olana kadar kısa bekleme
+            for _ in range(10):
+                text = elem.text.strip().replace("\n", " ")
+                if text:
+                    return text
+                time.sleep(0.5)
+        except Exception:
+            if attempt == 1:
+                print(f"🔄 @{username} yeniden deneniyor...")
+                continue
+            debug_page(driver, username)
+    return None
 
 
 def run_advanced_bot(auth_token, ct0):
@@ -51,6 +90,13 @@ def run_advanced_bot(auth_token, ct0):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-notifications")
+    # Masaüstü görünümü zorla (küçük pencerede X mobil/kısıtlı arayüz gösterebiliyor)
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--lang=en-US")
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
@@ -84,7 +130,7 @@ def run_advanced_bot(auth_token, ct0):
         return
 
     followed_count = 0
-    seen_usernames = set()  # Aynı hesabı iki kez incelememek için
+    seen_usernames = set()
 
     for target in TARGET_TOP_ACCOUNTS:
         if followed_count >= DAILY_LIMIT:
@@ -96,7 +142,7 @@ def run_advanced_bot(auth_token, ct0):
         time.sleep(6)
 
         # Sayfayı aşağı kaydırarak kullanıcı kartlarını yükleme
-        for _ in range(2):
+        for _ in range(4):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3)
 
@@ -121,28 +167,22 @@ def run_advanced_bot(auth_token, ct0):
             seen_usernames.add(username)
 
             try:
-                # Kullanıcı profiline gidip takipçi sayısını doğrulama
-                driver.get(f"https://x.com/{username}")
-                time.sleep(3)
+                follower_text = get_follower_text(driver, username)
+                if not follower_text:
+                    print(f"⚠️ @{username} takipçi sayısı okunamadı (gizli/askıda/yüklenmedi), atlanıyor.")
+                    continue
 
-                # Takipçi sayısı linki (tüm metni alıp parser'a veriyoruz)
-                follower_elem = driver.find_element(
-                    By.XPATH,
-                    "//a[contains(@href, '/verified_followers') or contains(@href, '/followers')]"
-                )
-                follower_text = follower_elem.text.strip().replace("\n", " ")
                 follower_count = parse_follower_count(follower_text)
-
                 print(f"👤 @{username} | Takipçi: {follower_text} -> {int(follower_count)}")
 
                 if follower_count >= MIN_FOLLOWERS:
-                    # Takip et butonunu bulma ve tıklama
                     try:
-                        # Sadece profil başlığındaki buton (yan paneldeki "Kimi takip etmeli"
-                        # önerilerine yanlışlıkla tıklamamak için placementTracking içinde ara)
-                        follow_button = driver.find_element(
-                            By.XPATH,
-                            "//div[@data-testid='placementTracking']//button[contains(@data-testid, '-follow')]"
+                        # Sadece profil başlığındaki buton (yan paneldeki öneriler değil)
+                        follow_button = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((
+                                By.XPATH,
+                                "//div[@data-testid='placementTracking']//button[contains(@data-testid, '-follow')]"
+                            ))
                         )
                         button_text = follow_button.text.lower()
 
@@ -154,12 +194,12 @@ def run_advanced_bot(auth_token, ct0):
                             print(f"✅ [{followed_count}/{DAILY_LIMIT}] Başarıyla takip edildi: @{username} (Takipçi: {follower_text})")
                             time.sleep(random.uniform(15, 30))
                     except Exception as btn_err:
-                        print(f"⚠️ Takip et butonu bulunamadı: {btn_err}")
+                        print(f"⚠️ Takip et butonu bulunamadı (@{username}): {str(btn_err)[:120]}")
                 else:
                     print(f"⏩ Kriter altı hesap ({int(follower_count)} < {MIN_FOLLOWERS}), atlanıyor: @{username}")
 
             except Exception as e:
-                print(f"⚠️ @{username} incelenirken hata oluştu: {e}")
+                print(f"⚠️ @{username} incelenirken hata oluştu: {str(e)[:150]}")
                 continue
 
     driver.quit()
