@@ -48,25 +48,28 @@ def run_advanced_bot(auth_token, ct0):
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    # Cookie ile güvenli giriş (Domain hatasını önlemek için güncellenmiş yöntem)
+    # CDP (Chrome DevTools Protocol) ile çerez enjeksiyonu - Domain hatasını kesin olarak çözer
     try:
         driver.get("https://x.com")
-        time.sleep(4)
+        time.sleep(2)
         
-        driver.add_cookie({
+        driver.execute_cdp_cmd('Network.setCookie', {
             'name': 'auth_token',
             'value': auth_token,
-            'domain': 'x.com',
-            'path': '/'
+            'domain': '.x.com',
+            'path': '/',
+            'secure': True,
+            'httpOnly': True
         })
-        driver.add_cookie({
+        driver.execute_cdp_cmd('Network.setCookie', {
             'name': 'ct0',
             'value': ct0,
-            'domain': 'x.com',
-            'path': '/'
+            'domain': '.x.com',
+            'path': '/',
+            'secure': True
         })
         
-        driver.refresh()
+        driver.get("https://x.com")
         time.sleep(5)
         print("✅ X oturumu çerezler ile başarıyla açıldı.")
     except Exception as e:
