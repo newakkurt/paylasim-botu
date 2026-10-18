@@ -49,14 +49,14 @@ def run_advanced_bot(auth_token, ct0):
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    # Cookie ile güvenli giriş (JavaScript yöntemiyle domain sorununu bypass etme)
+    # Cookie ile güvenli giriş (Selenium native add_cookie - domain parametresiz)
     try:
         driver.get("https://x.com")
-        time.sleep(3)
-        driver.execute_script(f"document.cookie = 'auth_token={auth_token}; domain=.x.com; path=/';")
-        driver.execute_script(f"document.cookie = 'ct0={ct0}; domain=.x.com; path=/';")
+        time.sleep(5)  # Sayfanın tam oturması için bekleme süresi
+        driver.add_cookie({'name': 'auth_token', 'value': auth_token})
+        driver.add_cookie({'name': 'ct0', 'value': ct0})
         driver.refresh()
-        time.sleep(3)
+        time.sleep(5)
         print("✅ X oturumu çerezler ile başarıyla açıldı.")
     except Exception as e:
         print(f"❌ Çerez eklenirken hata oluştu: {e}")
