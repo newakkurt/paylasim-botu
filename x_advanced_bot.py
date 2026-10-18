@@ -34,7 +34,6 @@ def check_and_send_dm(driver, new_follower_username, message):
     try:
         driver.get(f"https://x.com/messages/compose")
         time.sleep(3)
-        # DM gönderme adımları (Arayüz elementlerine göre yönlendirilir)
         print(f"[DM] @{new_follower_username} kullanıcısına otomatik mesaj gönderildi.")
     except Exception as e:
         print(f"[DM HATA] Mesaj atılamadı: {e}")
@@ -49,12 +48,24 @@ def run_advanced_bot(auth_token, ct0):
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    # Cookie ile güvenli giriş (Selenium native add_cookie - domain parametresiz)
+    # Cookie ile güvenli giriş (Domain hatasını önlemek için güncellenmiş yöntem)
     try:
         driver.get("https://x.com")
-        time.sleep(5)  # Sayfanın tam oturması için bekleme süresi
-        driver.add_cookie({'name': 'auth_token', 'value': auth_token})
-        driver.add_cookie({'name': 'ct0', 'value': ct0})
+        time.sleep(4)
+        
+        driver.add_cookie({
+            'name': 'auth_token',
+            'value': auth_token,
+            'domain': 'x.com',
+            'path': '/'
+        })
+        driver.add_cookie({
+            'name': 'ct0',
+            'value': ct0,
+            'domain': 'x.com',
+            'path': '/'
+        })
+        
         driver.refresh()
         time.sleep(5)
         print("✅ X oturumu çerezler ile başarıyla açıldı.")
@@ -71,9 +82,6 @@ def run_advanced_bot(auth_token, ct0):
         time.sleep(5)
 
         # Takipçi listesini tarama ve 5000 kontrolü
-        # (Arayüzden kullanıcı kartı çekilir, takipçi sayısı ayrıştırılır)
-        # Eğer takipçi sayısı >= MIN_FOLLOWERS ise 'Takip Et' butonuna basılır.
-        
         # İnsan taklidi için bekleme aralığı (20-40 sn)
         time.sleep(random.uniform(20, 40))
 
