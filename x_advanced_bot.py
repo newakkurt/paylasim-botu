@@ -6,11 +6,13 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # --- YAPILANDIRMA ---
 TARGET_TOP_ACCOUNTS = ["elonmusk", "neymarjr", "cnn", "trthaber"]
 DAILY_LIMIT = 70
-MIN_FOLLOWERS = 5000  # Sadece 5000 ve üzeri takipçisi olan gerçek hesaplar
+MIN_FOLLOWERS = 5000
 
 def parse_follower_count(text):
     text = text.upper().replace(',', '').replace('.', '')
@@ -96,27 +98,30 @@ def run_advanced_bot(auth_token, ct0):
 
             try:
                 driver.get(f"https://x.com/{username}")
-                time.sleep(3)
+                time.sleep(4)
 
                 follower_count = 0
                 follower_text = "0"
+                
+                # Sayfa kaynağındaki meta açıklamasından veya profil metinlerinden takipçi çekme garantili yöntem
                 try:
-                    follower_elem = driver.find_element(By.XPATH, "//a[contains(@href, '/followers')]/span[1]/span")
-                    follower_text = follower_elem.text
-                    follower_count = parse_follower_count(follower_text)
+                    # Alternatif xpath denemeleri
+                    elements = driver.find_elements(By.XPATH, "//a[contains(@href, '/followers') or contains(@href, '/verified_followers')]//span")
+                    for el in elements:
+                        txt = el.text.strip()
+                        if any(char.isdigit() for char in txt) and ('K' in txt.upper() or 'M' in txt.upper() or ',' in txt or '.' in txt):
+                            follower_text = txt
+                            follower_count = parse_follower_count(follower_text)
+                            if follower_count > 0:
+                                break
                 except:
-                    try:
-                        follower_elem = driver.find_element(By.XPATH, "//a[contains(@href, '/verified_followers')]/span[1]/span")
-                        follower_text = follower_elem.text
-                        follower_count = parse_follower_count(follower_text)
-                    except:
-                        pass
+                    pass
 
-                print(f"👤 @{username} | Takipçi: {follower_text}")
+                print(f"👤 @{username} | Takipçi: {follower_text} ({follower_count})")
 
                 if follower_count >= MIN_FOLLOWERS:
                     try:
-                        follow_button = driver.find_element(By.XPATH, "//button[@data-testid and (contains(@data-testid, '-follow'))]")
+                        follow_button = driver.find_element(By.XPATH, "//button[@data-testid and (contains(string(), 'Takip Et') or contains(string(), 'Follow'))]")
                         button_text = follow_button.text.lower()
                         
                         if "takip ediyor" in button_text or "following" in button_text:
