@@ -49,15 +49,8 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           SKIP_WAIT: ${{ inputs.skip_wait && '1' || '' }}
 
-      # --- YENİ EKLENEN ADIM: X Advanced Bot (Takip Botu) ---
+     # --- YENİ EKLENEN ADIM: X Advanced Bot (Takip Botu) ---
       - name: Run X Advanced Bot
-        run: python x_advanced_bot.py
-        env:
-          X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
-          X_CT0: ${{ secrets.X_CT0 }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          - name: Run X Advanced Bot
         run: python x_advanced_bot.py
         env:
           X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
