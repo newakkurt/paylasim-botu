@@ -40,6 +40,11 @@ def check_and_send_dm(driver, new_follower_username, message):
 
 def run_advanced_bot(auth_token, ct0):
     options = webdriver.ChromeOptions()
+    # GitHub sunucusunda arayüz olmadığı için zorunlu argümanlar:
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-notifications")
     # Gerekli browser konfigürasyonları
     options.add_argument("--disable-notifications")
     
