@@ -49,16 +49,17 @@ def run_advanced_bot(auth_token, ct0):
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    # Cookie ile giriş (Domain parametresi olmadan)
+    # Cookie ile güvenli giriş ve domain yönetimi
     try:
         driver.get("https://x.com")
-        time.sleep(2)
-        driver.add_cookie({'name': 'auth_token', 'value': auth_token})
-        driver.add_cookie({'name': 'ct0', 'value': ct0})
-        driver.refresh()
         time.sleep(3)
+        driver.add_cookie({'name': 'auth_token', 'value': auth_token, 'domain': '.x.com'})
+        driver.add_cookie({'name': 'ct0', 'value': ct0, 'domain': '.x.com'})
+        driver.get("https://x.com")
+        time.sleep(3)
+        print("✅ X oturumu çerezler ile başarıyla açıldı.")
     except Exception as e:
-        print(f"Çerez eklenirken hata oluştu: {e}")
+        print(f"❌ Çerez eklenirken hata oluştu: {e}")
 
     followed_count = 0
 
