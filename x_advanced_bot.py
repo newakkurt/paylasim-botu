@@ -14,6 +14,10 @@ TARGET_TOP_ACCOUNTS = ["elonmusk", "neymarjr", "cnn", "trthaber"]
 DAILY_LIMIT = 70
 MIN_FOLLOWERS = 5000  # Sadece 5000 ve üzeri takipçisi olan hesaplar takip edilir
 PAGE_WAIT = 20        # Profil elemanları için maksimum bekleme (sn)
+# Hangi listeden aday toplanacak:
+#   "following" -> hedef hesapların TAKİP ETTİKLERİ (genelde büyük hesaplar, 5K+ çıkma şansı yüksek)
+#   "followers" -> hedef hesapların TAKİPÇİLERİ (çoğunlukla yeni/küçük hesaplar, 5K+ nadir)
+LIST_TYPE = "following"
 
 FOLLOWERS_LINK_XPATH = (
     "//a[contains(@href, '/verified_followers') or "
@@ -163,6 +167,7 @@ def run_advanced_bot(auth_token, ct0):
 
     followed_count = 0
     seen_usernames = set()
+    stats = {"incelendi": 0, "okunamadi": 0, "kriter_alti": 0, "buton_sorunu": 0}
 
     for target in TARGET_TOP_ACCOUNTS:
         if followed_count >= DAILY_LIMIT:
@@ -170,7 +175,7 @@ def run_advanced_bot(auth_token, ct0):
             break
 
         print(f"🔍 Hedef taranıyor: @{target}")
-        driver.get(f"https://x.com/{target}/followers")
+        driver.get(f"https://x.com/{target}/{LIST_TYPE}")
         time.sleep(6)
 
         # Sayfayı aşağı kaydırarak kullanıcı kartlarını yükleme
@@ -202,10 +207,12 @@ def run_advanced_bot(auth_token, ct0):
                 follower_text = get_follower_text(driver, username)
                 if not follower_text:
                     print(f"⚠️ @{username} takipçi sayısı okunamadı (gizli/askıda/yüklenmedi), atlanıyor.")
+                    stats["okunamadi"] += 1
                     continue
 
                 follower_count = parse_follower_count(follower_text)
                 print(f"👤 @{username} | Takipçi: {follower_text} -> {int(follower_count)}")
+                stats["incelendi"] += 1
 
                 if follower_count >= MIN_FOLLOWERS:
                     try:
@@ -226,13 +233,24 @@ def run_advanced_bot(auth_token, ct0):
                             time.sleep(random.uniform(15, 30))
                     except Exception as btn_err:
                         print(f"⚠️ Takip et butonu bulunamadı (@{username}): {str(btn_err)[:120]}")
+                        stats["buton_sorunu"] += 1
+                        try:
+                            ids = [b.get_attribute("data-testid") for b in
+                                   driver.find_elements(By.XPATH, "//button[contains(@data-testid,'follow')]")]
+                            print(f"🧪 BUTON DEBUG @{username}: {ids[:6]}")
+                        except Exception:
+                            pass
                 else:
                     print(f"⏩ Kriter altı hesap ({int(follower_count)} < {MIN_FOLLOWERS}), atlanıyor: @{username}")
+                    stats["kriter_alti"] += 1
 
             except Exception as e:
                 print(f"⚠️ @{username} incelenirken hata oluştu: {str(e)[:150]}")
                 continue
 
+    print(f"📊 ÖZET | takip edilen: {followed_count} | incelenen: {stats['incelendi']} | "
+          f"kriter altı: {stats['kriter_alti']} | okunamayan: {stats['okunamadi']} | "
+          f"buton sorunu: {stats['buton_sorunu']}")
     driver.quit()
 
 
