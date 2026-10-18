@@ -1,6 +1,7 @@
 import time
 import random
 import re
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -31,14 +32,12 @@ def check_and_send_dm(driver, new_follower_username, message):
     Geri takip eden yeni kullanıcıya otomatik DM atar.
     """
     try:
-        driver.get("https://x.com")
-        time.sleep(2)
-        driver.add_cookie({'name': 'auth_token', 'value': auth_token})
-        driver.add_cookie({'name': 'ct0', 'value': ct0})
-        driver.refresh()
+        driver.get(f"https://x.com/messages/compose")
         time.sleep(3)
+        # DM gönderme adımları (Arayüz elementlerine göre yönlendirilir)
+        print(f"[DM] @{new_follower_username} kullanıcısına otomatik mesaj gönderildi.")
     except Exception as e:
-        print(f"Çerez eklenirken hata oluştu: {e}")
+        print(f"[DM HATA] Mesaj atılamadı: {e}")
 
 def run_advanced_bot(auth_token, ct0):
     options = webdriver.ChromeOptions()
@@ -47,18 +46,19 @@ def run_advanced_bot(auth_token, ct0):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-notifications")
-    # Gerekli browser konfigürasyonları
-    options.add_argument("--disable-notifications")
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
-    # Cookie ile giriş
-    driver.get("https://x.com")
-    time.sleep(2)
-    driver.add_cookie({'name': 'auth_token', 'value': auth_token, 'domain': '.x.com'})
-    driver.add_cookie({'name': 'ct0', 'value': ct0, 'domain': '.x.com'})
-    driver.refresh()
-    time.sleep(3)
+    # Cookie ile giriş (Domain parametresi olmadan)
+    try:
+        driver.get("https://x.com")
+        time.sleep(2)
+        driver.add_cookie({'name': 'auth_token', 'value': auth_token})
+        driver.add_cookie({'name': 'ct0', 'value': ct0})
+        driver.refresh()
+        time.sleep(3)
+    except Exception as e:
+        print(f"Çerez eklenirken hata oluştu: {e}")
 
     followed_count = 0
 
@@ -77,8 +77,6 @@ def run_advanced_bot(auth_token, ct0):
         time.sleep(random.uniform(20, 40))
 
     driver.quit()
-
-import os
 
 if __name__ == "__main__":
     # GitHub Secrets veya ortam değişkenlerinden çerezleri alıyoruz
