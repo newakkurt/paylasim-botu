@@ -32,7 +32,7 @@ jobs:
       X_FOLLOW_MIN_FOLLOWERS: ${{ vars.X_FOLLOW_MIN_FOLLOWERS || '1000' }}
       X_CLEANUP_NONFOLLOWERS: ${{ vars.X_CLEANUP_NONFOLLOWERS || 'true' }}
       X_DAILY_ACTION_CAP: ${{ vars.X_DAILY_ACTION_CAP || '10' }}
-      X_FOLLOW_DRY_RUN: ${{ github.event_name == 'schedule' && 'true' || (inputs.mode != 'apply' && 'true' || 'false') }}
+      X_FOLLOW_DRY_RUN: ${{ (github.event_name == 'schedule' && vars.X_SCHEDULED_APPLY != 'true') || (github.event_name != 'schedule' && inputs.mode != 'apply') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
