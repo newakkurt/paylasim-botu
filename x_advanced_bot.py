@@ -124,6 +124,10 @@ def run_advanced_bot(auth_token, ct0):
     driver.quit()
 
 if __name__ == "__main__":
+    if os.getenv("ENABLE_X_AUTO_FOLLOW", "").strip().lower() != "true":
+        print("🛡️ X otomatik takip devre dışı. İçerik paylaşım akışları etkilenmez.")
+        raise SystemExit(0)
+
     auth_token = os.getenv("X_AUTH_TOKEN")
     ct0 = os.getenv("X_CT0")
     
