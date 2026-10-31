@@ -1,0 +1,53 @@
+name: X Follow Manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run sadece planlar; apply gerçek takip/temizlik yapar"
+        type: choice
+        options:
+          - dry-run
+          - apply
+        default: dry-run
+  schedule:
+    - cron: "20 14 * * *"
+
+concurrency:
+  group: x-follow-manager
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ENABLE_X_AUTO_FOLLOW: ${{ secrets.ENABLE_X_AUTO_FOLLOW }}
+      X_USER_ACCESS_TOKEN: ${{ secrets.X_USER_ACCESS_TOKEN }}
+      X_USER_ID: ${{ secrets.X_USER_ID }}
+      X_TARGET_USER_IDS: ${{ vars.X_TARGET_USER_IDS }}
+      X_FOLLOW_MIN_FOLLOWERS: ${{ vars.X_FOLLOW_MIN_FOLLOWERS || '1000' }}
+      X_CLEANUP_NONFOLLOWERS: ${{ vars.X_CLEANUP_NONFOLLOWERS || 'true' }}
+      X_DAILY_ACTION_CAP: ${{ vars.X_DAILY_ACTION_CAP || '10' }}
+      X_FOLLOW_DRY_RUN: ${{ github.event_name == 'schedule' && 'true' || (inputs.mode != 'apply' && 'true' || 'false') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests
+      - name: Run X manager
+        run: python x_follow_manager.py
+      - name: Save daily action state
+        if: always()
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          if [ -f x_follow_state.json ]; then
+            git add x_follow_state.json
+            git diff --cached --quiet || (git commit -m "Update X follow manager state" && git pull --rebase && git push)
+          fi
