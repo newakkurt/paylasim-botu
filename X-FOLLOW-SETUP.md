@@ -27,7 +27,7 @@ Actions > X Follow Manager > Run workflow:
 - `dry-run`: yalnızca planı ve adayları loglar, işlem yapmaz.
 - `apply`: gerçek takip/takipten çıkma işlemi yapar. Bunun için gerekli secret'lar ve API erişimi gerekir.
 
-Zamanlanmış günlük çalışma güvenlik amacıyla her zaman dry-run modundadır. Gerçek otomatik işlem için önce izinleri, hedef listesini ve deneme logunu kontrol et.
+Zamanlanmış günlük çalışma varsayılan olarak dry-run modundadır. Deneme logunu ve hedef listesini kontrol ettikten sonra otomatik gerçek işlem istiyorsan GitHub Actions Variables içine X_SCHEDULED_APPLY=true ekle. ENABLE_X_AUTO_FOLLOW secret'ı da true olmalı. Önce düşük günlük limit (10) ile başla.
 
 ## Önemli sınırlar
 
