@@ -1734,6 +1734,27 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
                 msg += f"\n\n⚠️ Cevap tweeti zamanlanamadı: {reason2}"
         notify_telegram(msg)
 
+        # X içeriğini Instagram ve LinkedIn için ayrı, kopyalanabilir taslaklara dönüştür.
+        # Bu taslaklar otomatik yayınlanmaz; Telegram'dan gözden geçirilip manuel kullanılabilir.
+        try:
+            from repurpose_content import make_platform_variants
+            variants = make_platform_variants(content, _ask)
+            repurpose_msg = (
+                "📦 Çoklu platform içerik paketi (inceleme taslağı)\n\n"
+                "📸 INSTAGRAM\n" + variants["instagram_caption"] +
+                "\n\n💼 LINKEDIN\n" + variants["linkedin_post"]
+            )
+            notify_telegram(repurpose_msg)
+            st.setdefault("repurposed_posts", []).append({
+                "t": datetime.now(TZ).isoformat(),
+                "source_text": text[:500],
+                **variants,
+            })
+            st["repurposed_posts"] = st["repurposed_posts"][-50:]
+            save_state(st)
+        except Exception as e:
+            print(f"Çoklu platform taslak üretimi atlandı: {str(e)[:180]}")
+
         # Hatırlatma, tweetin YAYINLANMASINDAN (Buffer gecikmesi dahil) ENGAGE_DELAY_SEC sonra gelir
         remind_after = ENGAGE_DELAY_SEC + delay * 60
         if SKIP_WAIT or ENGAGE_DELAY_SEC <= 0:
