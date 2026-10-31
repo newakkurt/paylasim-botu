@@ -1,0 +1,22 @@
+name: Content System CI
+on:
+  push:
+    paths:
+      - "twitter_nature_bot.py"
+      - "repurpose_content.py"
+      - ".github/workflows/content-ci.yml"
+  pull_request:
+    paths:
+      - "twitter_nature_bot.py"
+      - "repurpose_content.py"
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile content pipeline
+        run: python -m py_compile twitter_nature_bot.py repurpose_content.py
