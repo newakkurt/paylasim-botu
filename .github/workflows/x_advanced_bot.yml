@@ -1,8 +1,7 @@
 name: X Advanced Bot Run
 
 on:
-  schedule:
-    - cron: "0 9,15,21 * * *" # Günde 3 kez uygun saatlerde
+  # Automatic follow schedule removed: platform-account safety. Manual dispatch remains.
   workflow_dispatch:
 
 jobs:
