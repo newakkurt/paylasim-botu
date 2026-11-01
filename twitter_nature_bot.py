@@ -36,10 +36,10 @@ def _env_on(name: str, default: bool = True) -> bool:
 
 # --- ENV VARIABLES ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.8-flash"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL") or "meta-llama/llama-3.3-70b-instruct:free"
+OPENROUTER_MODEL = (os.getenv("OPENROUTER_MODEL") or "").strip()
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
@@ -447,7 +447,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 GROQ_MODELS = [
     m.strip()
-    for m in (os.getenv("GROQ_MODELS") or "llama-3.3-70b-versatile,openai/gpt-oss-120b,llama-3.1-8b-instant").split(",")
+    for m in (os.getenv("GROQ_MODELS") or "openai/gpt-oss-120b,openai/gpt-oss-20b").split(",")
     if m.strip()
 ]
 _FAST_RE = re.compile(r"(?<![\w.])(?:8|20)b(?!\w)|(?:^|[-/])mini(?:$|[-:])", re.I)
@@ -494,7 +494,8 @@ def _chain(as_json: bool, tier: str = "strong", avoid_family=None):
     if GROQ_API_KEY:
         for m in GROQ_MODELS:
             chain.append((f"groq:{m}", lambda p, t, m=m: _chat_call(GROQ_URL, GROQ_API_KEY, m, p, t)))
-    if OPENROUTER_API_KEY:
+    # OpenRouter is opt-in: old free model slugs were returning 404.
+    if OPENROUTER_API_KEY and OPENROUTER_MODEL:
         chain.append((
             f"openrouter:{OPENROUTER_MODEL}",
             lambda p, t: _chat_call(OPENROUTER_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL, p, t, 40),
