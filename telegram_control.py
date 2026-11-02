@@ -101,6 +101,9 @@ HELP_TEXT = (
     "/hava — Anlık İstanbul hava durumu paylaşır\n"
     "/video — Pexels'ten tekrarsız HD doğa videosu paylaşır\n"
     "/etkilesim — Günlük etkileşim önerisi (hesap listesi + örnek yorumlar)\n"
+    "/durum — Son 7 günün bot çalışma özeti\n"
+    "/rapor — Haftalık paylaşım raporu\n"
+    "/hatalar — Son başarısız çalışma kayıtları\n"
     "/yardim — Bu mesajı gösterir\n\n"
     "🕐 Otomatik günlük akış:\n"
     "07:00 — Hava durumu (Günaydın)\n"
@@ -316,6 +319,32 @@ def schedule_engagement_reminder() -> None:
 def handle_command(cmd: str) -> None:
     if cmd in HELP_COMMANDS:
         send_message(HELP_TEXT)
+        return
+
+    if cmd == "/rapor":
+        send_message(build_weekly_report())
+        return
+
+    if cmd == "/durum":
+        stats = load_stats()
+        cutoff = datetime.now(ISTANBUL_TZ).date() - timedelta(days=7)
+        recent = [s for s in stats if date.fromisoformat(s.get("date", "1970-01-01")) >= cutoff]
+        ok = sum(1 for s in recent if s.get("success"))
+        fail = len(recent) - ok
+        send_message(f"📊 Son 7 gün: {ok} başarılı / {fail} hatalı çalışma.\nToplam kayıt: {len(recent)}")
+        return
+
+    if cmd == "/hatalar":
+        stats = load_stats()
+        cutoff = datetime.now(ISTANBUL_TZ).date() - timedelta(days=7)
+        recent = [s for s in stats if not s.get("success") and date.fromisoformat(s.get("date", "1970-01-01")) >= cutoff]
+        if not recent:
+            send_message("✅ Son 7 günde kayıtlı hata yok.")
+        else:
+            lines = ["⚠️ Son 7 günün hatalı çalışmaları:"]
+            for entry in recent[-10:]:
+                lines.append(f"- {entry.get('date', '?')} | {entry.get('script', '?')} | {entry.get('trigger', '?')}")
+            send_message("\\n".join(lines))
         return
 
     script = COMMANDS.get(cmd)
