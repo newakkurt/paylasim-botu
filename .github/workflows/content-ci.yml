@@ -3,14 +3,14 @@ on:
   push:
     paths:
       - "twitter_nature_bot.py"
-      - "repurpose_content.py",
-      "telegram_control.py"
+      - "repurpose_content.py"
+      - "telegram_control.py"
       - ".github/workflows/content-ci.yml"
   pull_request:
     paths:
       - "twitter_nature_bot.py"
-      - "repurpose_content.py",
-      "telegram_control.py"
+      - "repurpose_content.py"
+      - "telegram_control.py"
 
 jobs:
   syntax-check:
