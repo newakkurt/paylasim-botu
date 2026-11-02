@@ -3,12 +3,14 @@ on:
   push:
     paths:
       - "twitter_nature_bot.py"
-      - "repurpose_content.py"
+      - "repurpose_content.py",
+      "telegram_control.py"
       - ".github/workflows/content-ci.yml"
   pull_request:
     paths:
       - "twitter_nature_bot.py"
-      - "repurpose_content.py"
+      - "repurpose_content.py",
+      "telegram_control.py"
 
 jobs:
   syntax-check:
@@ -19,4 +21,4 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile content pipeline
-        run: python -m py_compile twitter_nature_bot.py repurpose_content.py
+        run: python -m py_compile twitter_nature_bot.py repurpose_content.py telegram_control.py
