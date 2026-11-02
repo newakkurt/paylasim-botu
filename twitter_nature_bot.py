@@ -467,7 +467,7 @@ def _gemini_call(prompt: str, temperature: float, as_json: bool) -> str:
         f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
         headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
         json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg},
-        timeout=30,
+        timeout=60,
     )
     if res.status_code != 200:
         raise RuntimeError(f"{res.status_code} {res.text[:150]}")
@@ -475,11 +475,19 @@ def _gemini_call(prompt: str, temperature: float, as_json: bool) -> str:
     return "".join(p.get("text", "") for p in parts if not p.get("thought"))
 
 
-def _chat_call(url: str, key: str, model: str, prompt: str, temperature: float, timeout: int = 30) -> str:
+def _chat_call(url: str, key: str, model: str, prompt: str, temperature: float,
+               timeout: int = 45, as_json: bool = False) -> str:
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+    }
+    if as_json:
+        payload["response_format"] = {"type": "json_object"}
     res = requests.post(
         url,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": temperature},
+        json=payload,
         timeout=timeout,
     )
     if res.status_code != 200:
@@ -493,12 +501,12 @@ def _chain(as_json: bool, tier: str = "strong", avoid_family=None):
         chain.append((f"gemini:{GEMINI_MODEL}", lambda p, t: _gemini_call(p, t, as_json)))
     if GROQ_API_KEY:
         for m in GROQ_MODELS:
-            chain.append((f"groq:{m}", lambda p, t, m=m: _chat_call(GROQ_URL, GROQ_API_KEY, m, p, t)))
+            chain.append((f"groq:{m}", lambda p, t, m=m: _chat_call(GROQ_URL, GROQ_API_KEY, m, p, t, as_json=as_json)))
     # OpenRouter is opt-in: old free model slugs were returning 404.
     if OPENROUTER_API_KEY and OPENROUTER_MODEL:
         chain.append((
             f"openrouter:{OPENROUTER_MODEL}",
-            lambda p, t: _chat_call(OPENROUTER_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL, p, t, 40),
+            lambda p, t: _chat_call(OPENROUTER_URL, OPENROUTER_API_KEY, OPENROUTER_MODEL, p, t, 50, as_json),
         ))
     now = time.time()
     chain = [c for c in chain if _cooldown.get(c[0], 0) <= now]
@@ -552,6 +560,10 @@ def _ask(prompt: str, as_json: bool = True, tier: str = "strong", temperature: f
                     _cooldown[name] = time.time() + 1800    # kota: yarım saat dinlendir
                 elif code in ("401", "403", "404"):
                     _cooldown[name] = time.time() + 86400   # yanlış model adı / anahtar: bir gün
+                elif code == "503":
+                    _cooldown[name] = time.time() + 300     # sağlayıcı yoğun: 5 dk bekle
+                elif code.startswith("5"):
+                    _cooldown[name] = time.time() + 120     # geçici sağlayıcı hatası
                 if _cooldown.get(name, 0) > time.time():
                     chain = [c for c in chain if c[0] != name]
         if not chain:
