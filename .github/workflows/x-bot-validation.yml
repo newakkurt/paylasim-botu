@@ -1,0 +1,27 @@
+name: X Bot Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "twitter_nature_bot.py"
+      - "x_follow_manager.py"
+      - "x_advanced_bot.py"
+      - ".github/workflows/nature_bot.yml"
+      - ".github/workflows/x-follow-manager.yml"
+      - ".github/workflows/x_advanced_bot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile X bot modules
+        run: python -m py_compile twitter_nature_bot.py x_follow_manager.py x_advanced_bot.py
