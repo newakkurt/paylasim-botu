@@ -344,7 +344,7 @@ def handle_command(cmd: str) -> None:
             lines = ["⚠️ Son 7 günün hatalı çalışmaları:"]
             for entry in recent[-10:]:
                 lines.append(f"- {entry.get('date', '?')} | {entry.get('script', '?')} | {entry.get('trigger', '?')}")
-            send_message("\\n".join(lines))
+            send_message("\n".join(lines))
         return
 
     script = COMMANDS.get(cmd)
