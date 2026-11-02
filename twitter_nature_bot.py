@@ -517,7 +517,15 @@ def _clean(text: str) -> str:
 
 
 def _extract_json(text: str):
-    return json.loads(text[text.index("{"): text.rindex("}") + 1])
+    """JSON yanıtını markdown fence veya açıklama metni olsa da güvenli ayrıştır."""
+    cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", str(text), flags=re.I | re.M).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("Model geçerli JSON nesnesi döndürmedi.")
+        return json.loads(cleaned[start:end + 1])
 
 
 def _ask(prompt: str, as_json: bool = True, tier: str = "strong", temperature: float = 0.7, avoid_family=None):
