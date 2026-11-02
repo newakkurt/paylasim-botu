@@ -1,30 +1,52 @@
 name: X Advanced Bot Run
 
 on:
-  # Automatic follow schedule removed: platform-account safety. Manual dispatch remains.
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run planı gösterir; apply yalnızca allow-list hedeflerini takip eder"
+        type: choice
+        options:
+          - dry-run
+          - apply
+        default: dry-run
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: x-advanced-bot
+  cancel-in-progress: false
 
 jobs:
   run-follow-bot:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
+    env:
+      ENABLE_X_AUTO_FOLLOW: ${{ secrets.ENABLE_X_AUTO_FOLLOW }}
+      X_USER_ACCESS_TOKEN: ${{ secrets.X_USER_ACCESS_TOKEN }}
+      X_USER_ID: ${{ secrets.X_USER_ID }}
+      X_TARGET_USER_IDS: ${{ vars.X_TARGET_USER_IDS }}
+      X_FOLLOW_MIN_FOLLOWERS: ${{ vars.X_FOLLOW_MIN_FOLLOWERS || '1000' }}
+      X_CLEANUP_NONFOLLOWERS: ${{ vars.X_CLEANUP_NONFOLLOWERS || 'false' }}
+      X_DAILY_ACTION_CAP: ${{ vars.X_DAILY_ACTION_CAP || '10' }}
+      X_FOLLOW_DRY_RUN: ${{ inputs.mode != 'apply' }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install dependencies
+        run: python -m pip install --upgrade pip requests
+      - name: Run official X API follow manager
+        run: python x_follow_manager.py
+      - name: Save daily action state
+        if: always()
         run: |
-          python -m pip install --upgrade pip
-          pip install requests selenium webdriver-manager
-
-      - name: Run X Advanced Bot
-        run: python x_advanced_bot.py
-        env:
-          X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
-          X_CT0: ${{ secrets.X_CT0 }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          if [ -f x_follow_state.json ]; then
+            git add x_follow_state.json
+            git diff --cached --quiet || (git commit -m "Update X follow manager state" && git pull --rebase && git push)
+          fi
