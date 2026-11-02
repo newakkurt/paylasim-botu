@@ -10,6 +10,7 @@ on:
       - ".github/workflows/nature_bot.yml"
       - ".github/workflows/x-follow-manager.yml"
       - ".github/workflows/x_advanced_bot.yml"
+      - ".github/workflows/x-bot-validation.yml"
   workflow_dispatch:
 
 permissions:
