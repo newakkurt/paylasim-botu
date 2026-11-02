@@ -5,15 +5,15 @@ on:
     branches: [main]
     paths:
       - "twitter_nature_bot.py"
-      - "repurpose_content.py",
-      "telegram_control.py"
+      - "repurpose_content.py"
+      - "telegram_control.py"
       - "tests/**"
       - ".github/workflows/content-quality.yml"
   pull_request:
     paths:
       - "twitter_nature_bot.py"
-      - "repurpose_content.py",
-      "telegram_control.py"
+      - "repurpose_content.py"
+      - "telegram_control.py"
       - "tests/**"
       - ".github/workflows/content-quality.yml"
   workflow_dispatch:
