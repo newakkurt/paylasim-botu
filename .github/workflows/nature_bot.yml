@@ -30,6 +30,15 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Keep duplicate/source/media history between ephemeral GitHub runners.
+      - name: Restore content history
+        uses: actions/cache@v4
+        with:
+          path: bot_state.json
+          key: nature-bot-state-${{ github.run_id }}
+          restore-keys: |
+            nature-bot-state-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
