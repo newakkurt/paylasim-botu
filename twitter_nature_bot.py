@@ -1700,7 +1700,7 @@ def run_job(wait: bool = True, background_reminder: bool = False) -> bool:
         else:
             print(f"⏸️ {MAX_ATTEMPTS} denemede de tekrar eden/benzer içerik çıktı, bu tur atlandı.")
             notify_telegram("⏸️ Tekrar eden veya geçmişe çok benzeyen içerik tespit edildi, bu tur paylaşım yapılmadı.")
-        return True
+        return False
 
     text = content["text"]
     followups = content["followups"]
