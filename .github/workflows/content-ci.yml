@@ -5,13 +5,18 @@ on:
       - "twitter_nature_bot.py"
       - "repurpose_content.py"
       - "telegram_control.py"
+      - "linkedin_bot.py"
+      - "youtube_bot.py"
+      - "tests/**"
       - ".github/workflows/content-ci.yml"
   pull_request:
     paths:
       - "twitter_nature_bot.py"
       - "repurpose_content.py"
       - "telegram_control.py"
-
+      - "linkedin_bot.py"
+      - "youtube_bot.py"
+      - "tests/**"
 jobs:
   syntax-check:
     runs-on: ubuntu-latest
@@ -20,5 +25,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile content pipeline
-        run: python -m py_compile twitter_nature_bot.py repurpose_content.py telegram_control.py
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip requests
+      - name: Compile publishing modules
+        run: python -m py_compile twitter_nature_bot.py repurpose_content.py telegram_control.py linkedin_bot.py youtube_bot.py
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
