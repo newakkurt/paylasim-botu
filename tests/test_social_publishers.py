@@ -29,11 +29,14 @@ class YouTubePublisherTests(unittest.TestCase):
                     {"link": "https://example.com/landscape.mp4", "width": 1280, "height": 720},
                     {"link": "https://example.com/portrait.mp4", "width": 720, "height": 1280}]}]}
         original = youtube_bot.requests.get
+        original_key = youtube_bot.PEXELS_API_KEY
+        youtube_bot.PEXELS_API_KEY = "test-key"
         youtube_bot.requests.get = lambda *args, **kwargs: Response()
         try:
             selected = youtube_bot.fetch_portrait_video("forest")
         finally:
             youtube_bot.requests.get = original
+            youtube_bot.PEXELS_API_KEY = original_key
         self.assertEqual(selected["url"], "https://example.com/portrait.mp4")
     def test_long_video_is_not_selected(self):
         class Response:
@@ -42,12 +45,15 @@ class YouTubePublisherTests(unittest.TestCase):
                 return {"videos": [{"id": 13, "duration": 240, "video_files": [
                     {"link": "https://example.com/portrait.mp4", "width": 720, "height": 1280}]}]}
         original = youtube_bot.requests.get
+        original_key = youtube_bot.PEXELS_API_KEY
+        youtube_bot.PEXELS_API_KEY = "test-key"
         youtube_bot.requests.get = lambda *args, **kwargs: Response()
         try:
             with self.assertRaises(RuntimeError):
                 youtube_bot.fetch_portrait_video("forest")
         finally:
             youtube_bot.requests.get = original
+            youtube_bot.PEXELS_API_KEY = original_key
 
 if __name__ == "__main__":
     unittest.main()
