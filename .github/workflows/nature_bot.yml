@@ -2,14 +2,14 @@ name: Nature Bot Daily Post
 
 on:
   schedule:
-    # UTC -> Istanbul (UTC+3): 08:00, 14:00, 20:00
-    - cron: "0 5,11,17 * * *"
+    # Istanbul 11:00 and 14:00 (UTC 08:00 and 11:00)
+    - cron: "0 8,11 * * *"
   workflow_dispatch:
     inputs:
       skip_wait:
-        description: "Etkileşim hatırlatmasını (16 dk bekleme) atla - test için"
+        description: "Etkileşim hatırlatmasını atla - test için"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -21,16 +21,12 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      # Keep duplicate/source/media history between ephemeral GitHub runners.
       - name: Restore content history
         uses: actions/cache@v4
         with:
@@ -38,26 +34,21 @@ jobs:
           key: nature-bot-state-${{ github.run_id }}
           restore-keys: |
             nature-bot-state-
-
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests selenium webdriver-manager tweepy
-
-      - name: Run Nature Bot (Paylaşım Botu)
+        run: python -m pip install --upgrade pip requests
+      - name: Run Nature Bot
         run: python twitter_nature_bot.py
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
           BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODELS: ${{ vars.GROQ_MODELS || 'openai/gpt-oss-120b,openai/gpt-oss-20b' }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           SKIP_WAIT: ${{ inputs.skip_wait && '1' || '' }}
