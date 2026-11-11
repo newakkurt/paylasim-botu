@@ -57,6 +57,8 @@ X_API_KEY = os.getenv("X_API_KEY")
 X_API_SECRET = os.getenv("X_API_SECRET")
 X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
+# Paid X API auto-replies are opt-in; Buffer publishing and Telegram reply suggestions remain available.
+ENABLE_X_AUTO_REPLY = _env_flag("ENABLE_X_AUTO_REPLY")
 
 # Paylaşımdan kaç saniye sonra etkileşim hatırlatması gitsin (varsayılan 960 sn = 16 dk)
 ENGAGE_DELAY_SEC = _env_int("ENGAGE_DELAY_SEC", 960)
@@ -1413,7 +1415,10 @@ def get_tweepy_client():
 
 
 def auto_reply_job() -> int:
-    """ÜCRETLİ X API gerektirir; anahtar yoksa sessizce atlanır."""
+    """ÜCRETLİ X API gerektirir; varsayılan olarak kapalıdır."""
+    if not ENABLE_X_AUTO_REPLY:
+        print("↩️ X API otomatik yanıt kapalı. Ücretsiz yol: Telegram /cevap önerisi.")
+        return 0
     client = get_tweepy_client()
     if client is None:
         print("↩️ Otomatik cevap atlandı (X API anahtarı yok). Ücretsiz yol: /cevap veya --suggest.")
@@ -1823,8 +1828,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     ok = run_job()
-    try:
-        auto_reply_job()  # X API anahtarı yoksa sessizce atlanır
-    except Exception as e:
-        print(f"Oto cevap hatası: {e}")
+    if ENABLE_X_AUTO_REPLY:
+        try:
+            auto_reply_job()
+        except Exception as e:
+            print(f"Oto cevap hatası: {e}")
+    else:
+        print("ℹ️ Ücretli X API otomatik yanıtı devre dışı; manuel Telegram önerileri kullanılabilir.")
     sys.exit(0 if ok else 1)
