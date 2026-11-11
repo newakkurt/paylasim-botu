@@ -1,0 +1,35 @@
+name: YouTube Daily Shorts
+on:
+  schedule:
+    - cron: "0 15 * * *" # Istanbul 18:00
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "OAuth/kanal kontrolü yap; video yükleme"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: youtube-daily-shorts
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests google-api-python-client google-auth google-auth-httplib2
+      - name: Upload YouTube Short
+        run: python youtube_bot.py
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_PRIVACY_STATUS: "public"
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
