@@ -89,6 +89,7 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 STATE_FILE = "state/telegram_offset.json"
 SCHEDULE_STATE_FILE = "state/last_auto_posts.json"
 STATS_FILE = "state/weekly_stats.json"
+ENABLE_DAILY_SCHEDULER = (os.getenv("ENABLE_DAILY_SCHEDULER") or "1").strip().lower() not in ("0", "false", "no")
 
 try:
     ENGAGE_DELAY_SEC = int(os.environ.get("ENGAGE_DELAY_SEC") or 960)
@@ -449,7 +450,8 @@ def main() -> None:
     while True:
         try:
             offset = process_updates(offset)
-            check_daily_auto_posts()
+            if ENABLE_DAILY_SCHEDULER:
+                check_daily_auto_posts()
             check_weekly_report()
         except Exception as e:
             print("Döngü hatası:", e)
