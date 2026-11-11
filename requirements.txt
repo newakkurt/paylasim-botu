@@ -2,11 +2,10 @@ twikit
 google-genai
 groq
 beautifulsoup4
-
-twikit
 requests
 schedule
-
 pyTelegramBotAPI
-requests
 tweepy
+google-api-python-client
+google-auth
+google-auth-httplib2
