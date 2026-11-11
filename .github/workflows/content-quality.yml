@@ -1,5 +1,4 @@
 name: Content Pipeline Checks
-
 on:
   push:
     branches: [main]
@@ -7,6 +6,8 @@ on:
       - "twitter_nature_bot.py"
       - "repurpose_content.py"
       - "telegram_control.py"
+      - "linkedin_bot.py"
+      - "youtube_bot.py"
       - "tests/**"
       - ".github/workflows/content-quality.yml"
   pull_request:
@@ -14,10 +15,10 @@ on:
       - "twitter_nature_bot.py"
       - "repurpose_content.py"
       - "telegram_control.py"
+      - "linkedin_bot.py"
+      - "youtube_bot.py"
       - "tests/**"
-      - ".github/workflows/content-quality.yml"
   workflow_dispatch:
-
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -26,7 +27,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile content modules
-        run: python -m compileall -q twitter_nature_bot.py repurpose_content.py telegram_control.py
-      - name: Run content tests
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip requests
+      - name: Compile publishing modules
+        run: python -m compileall -q twitter_nature_bot.py repurpose_content.py telegram_control.py linkedin_bot.py youtube_bot.py
+      - name: Run unit tests
         run: python -m unittest discover -s tests -v
